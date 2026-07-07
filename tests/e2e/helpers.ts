@@ -5,5 +5,6 @@ export async function login(page: Page) {
   await page.goto("/login");
   await page.getByLabel("Password").fill("test-password");
   await page.getByRole("button", { name: "Enter" }).click();
-  await expect(page).toHaveURL(/\/canon/);
+  // Generous timeout: the Next dev server compiles routes on first hit.
+  await expect(page).toHaveURL(/\/canon/, { timeout: 20_000 });
 }

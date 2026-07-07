@@ -82,6 +82,45 @@ variant. Fixtures live in `tests/fixtures/` and are read from disk only when
 
 ---
 
+## Phase 3
+
+### D10: Stream control frame uses a printable sentinel
+
+The draft stream sends prose chunks then a control frame carrying the clean text and
+alerts. They are separated by the printable sentinel `<<<BOOKFORGE_CTRL>>>` (an
+earlier null-byte delimiter was dropped because git would treat the source file as
+binary). The sentinel never occurs in prose, so the split is unambiguous.
+
+### D11: Drafting is persistence-stateless; the client owns editor text
+
+`POST /api/chapters/[id]/draft` only assembles and streams; it does not write drafts.
+The editor holds the text and persists via `POST /api/chapters/[id]/save-draft`,
+which upserts the working (latest) draft version. Continue appends a new segment;
+Redraft drops the last segment and regenerates. This avoids tracking a scene-to-beat
+mapping on the server and keeps Redraft well defined.
+
+### D12: No book-level summaries stored
+
+SPEC's STORY SO FAR block calls for "a one-line summary per prior book if any". The
+data model stores chapter summaries, not book summaries, so the assembler emits a
+pointer line per prior book instead of a synthesized one-liner. The heavy lifting is
+done by the per-chapter summaries. This can be revisited when Book 2 drafting needs
+richer prior-book context.
+
+### D13: A test fixture deliberately contains an em-dash
+
+`tests/fixtures/draft.emdash.json` contains a U+2014 on purpose: it is the negative
+input that proves the em-dash linter rejects and retries. It is test-only data, read
+only under `USE_FIXTURE_LLM=1`, and never appears in shipped prose, UI, or code.
+
+### D14: Em-dash retry surfaces, never hides, a residual violation
+
+If the single retry still contains an em-dash, the draft is not silently accepted:
+the control frame sets `emDashUnresolved` and the editor shows a warning to fix it
+before locking. The rule is enforced, not softened.
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

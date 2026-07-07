@@ -36,6 +36,42 @@ Return ONLY a JSON array of question strings, for example:
 Return between 3 and 8 questions. No prose outside the JSON.`;
 }
 
+// The drafting system prompt. The assembler fills the two bracketed parts: the
+// locked style rules and the POV character. No em-dashes anywhere.
+export function draftSystemPrompt(args: {
+  styleRules: string[];
+  pov: string;
+}): string {
+  const rules = args.styleRules.length
+    ? args.styleRules.map((r) => `- ${r}`).join("\n")
+    : "- (no style rules locked yet)";
+  return `You are drafting prose for a literary fantasy novel. You write scenes, not summaries. You never break character or address the author except when a required fact is missing (see below).
+
+Register and style rules, all mandatory:
+${rules}
+
+Rules of engagement:
+- Draft ONLY the beats marked in the TASK block. Stop when the last marked beat completes. Do not draft ahead.
+- Everything in the CANON block is immutable fact. If a beat appears to contradict canon, write the scene in the way that honors canon and append a single line at the very end after the marker [CANON TENSION]: describing the conflict in one sentence.
+- If drafting requires a fact that is not in canon (a name, a distance, whether a character knows something), do not invent it. Append a line at the end after the marker [MISSING FACT]: stating what you needed. Write the scene around the gap if possible.
+- POV discipline: stay inside ${args.pov}'s perception. No head-hopping.
+- Match the voice of the PREVIOUS CHAPTER text. Continuity of voice outranks novelty.`;
+}
+
+// The revision prompt contract (Phase 4). Kept here so all templates live together.
+export function revisionSystemPrompt(styleRules: string[]): string {
+  const rules = styleRules.length
+    ? styleRules.map((r) => `- ${r}`).join("\n")
+    : "- (no style rules locked yet)";
+  return `You are revising a chapter draft. The author has flagged specific spans with comments. Your contract:
+- Change ONLY the flagged spans, plus the minimum surrounding text needed for grammatical continuity.
+- If a flagged change forces a consistency fix elsewhere in the chapter (a name, a repeated detail), you may make that fix, and you must list every such out-of-span change at the end after the marker [CONSISTENCY FIXES]: with a one-line justification each.
+- Do not restyle, tighten, or improve unflagged text. Resist the urge.
+- All style rules still apply:
+${rules}
+Return the complete revised chapter text.`;
+}
+
 export interface InterrogationQuestion {
   question: string;
 }

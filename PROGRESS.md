@@ -132,3 +132,75 @@ locking that fact works from the same screen." All covered.
 - D9: Fixture routing is by `purpose` (+ optional `fixtureKey`), read from
   `tests/fixtures/` at runtime only when `USE_FIXTURE_LLM=1`. Not bundled into a
   real build.
+
+---
+
+## Phase 3: Context assembler and drafting
+
+Status: COMPLETE. All tests green. This is the first mandatory stop.
+
+### What was built
+
+- Context assembler (`src/lib/assembler.ts`): builds the drafting prompt from the
+  seven blocks in the SPEC order (system, then CANON, CHARACTERS, STORY SO FAR,
+  PREVIOUS CHAPTER, CURRENT CHAPTER, TASK). Returns the system string, the
+  concatenated user prompt, a per-block breakdown for inspection, the list of
+  appearing characters, and any budget warnings. Budget heuristics are character
+  count based (~4 chars/token): canon ~4k tokens (warns when over), previous chapter
+  ~8k tokens (front truncated), drafted-so-far ~6k tokens (keeps the last 1000 words
+  and labels the omission), chapter summaries capped at 150 words. Appearing
+  characters are POV plus any whose name occurs in the synopsis or beats; their
+  character_fact canon and effective state (latest state row with chapter_order <=
+  this chapter) are included.
+- Draft system prompt and revision prompt templates (`src/lib/llm/prompts.ts`),
+  filled with the locked style rules and POV, both forbidding em-dashes.
+- Streaming draft route (`POST /api/chapters/[id]/draft`): assembles the prompt,
+  streams prose chunks, then sends a control frame with the clean text, retry flag,
+  and extracted [MISSING FACT] / [CANON TENSION] alerts. Em-dash lint is enforced:
+  if the first output contains an em-dash (U+2014 or a double hyphen), the scene is
+  regenerated once with an explicit instruction, and the clean version replaces it.
+  A residual em-dash after retry is flagged, never hidden.
+- Marker extraction (`src/lib/llm/markers.ts`): strips the marker lines out of the
+  prose and returns them for the UI.
+- Draft editor UI (`/book/[projectId]/chapter/[chapterId]/draft`): beat picker,
+  Continue and Redraft, live streaming into an editable prose surface, alert panel
+  for retries, missing facts (with a one-click add-locked-fact-and-redraft flow),
+  canon tensions, and assembler warnings. Auto-saves the working draft.
+- Prompt inspector (`/book/[projectId]/chapter/[chapterId]/prompt`) and a dev JSON
+  route (`GET /api/dev/prompt/[chapterId]`, disabled in production) that dump the
+  fully assembled prompt for one chapter. This is the surface for judging the
+  assembler by eye at the stop.
+- Working-draft persistence (`src/lib/repo/drafts.ts`, `POST
+  /api/chapters/[id]/save-draft`).
+
+### Test results
+
+- Unit (vitest): 46 passed (8 new: assembler block order, scoping, beat marking,
+  previous-chapter and drafted-so-far truncation, canon over-budget warning, marker
+  extraction).
+- E2E (Playwright): 13 passed (4 new: clean prose streams into the editor; a forced
+  em-dash triggers a retry and the saved text is clean with no residual em-dash; a
+  [MISSING FACT] line surfaces as an alert and is stripped from the prose; the
+  assembled prompt is inspectable).
+- `tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Phase 3)
+
+"with seeded canon, two characters, one locked prior chapter, drafting a beat
+streams prose to the editor; the assembled prompt is loggable in dev mode for
+inspection; em-dash lint triggers a retry when forced; [MISSING FACT] lines surface
+as alerts." All covered by unit + E2E with the Anthropic client mocked.
+
+### Judgment calls (mirrored in DECISIONS.md)
+
+- D10: The stream uses a printable sentinel (`<<<BOOKFORGE_CTRL>>>`) to separate
+  prose from the trailing JSON control frame.
+- D11: Drafting is stateless w.r.t. persistence; the client owns the editor text and
+  saves via save-draft. Continue appends a segment, Redraft regenerates the last
+  segment. This keeps streaming pure and makes Redraft well defined without tracking
+  scene-to-beat mappings server side.
+- D12: Book-level one-line summaries are not stored, so STORY SO FAR emits a pointer
+  line per prior book rather than a synthesized summary. Chapter summaries drive the
+  block. Revisit if cross-book drafting needs richer prior-book context.
+- D13: One draft fixture (`draft.emdash.json`) intentionally contains a U+2014 as
+  negative-test input for the em-dash linter. It is test-only, never shipped prose.
