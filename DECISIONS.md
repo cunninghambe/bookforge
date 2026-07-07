@@ -57,6 +57,31 @@ confirm the current model id against the Claude docs before a real run.
 
 ---
 
+## Phase 2
+
+### D7: Chapter reorder uses up/down buttons, not drag
+
+SPEC describes "drag to reorder", but the Phase 2 acceptance check only requires that
+reorder persists order_index. Up/down buttons persist reliably and are
+deterministically testable in Playwright; drag-and-drop is fiddly to drive and adds
+no functional coverage. The drag gesture is deferred as UI polish.
+
+### D8: Interrogation answer becomes a self-contained plot_decision
+
+When an interrogation question is answered, the created provisional plot_decision
+fact's content is the question followed by the answer. That way the locked fact
+reads as a complete decision in the canon list without needing the original question
+for context.
+
+### D9: LLM fixture routing by purpose
+
+The mock client keys fixtures by call `purpose` (interrogation, summary, extraction,
+sweep, draft, revision) plus an optional `fixtureKey` when one test needs a specific
+variant. Fixtures live in `tests/fixtures/` and are read from disk only when
+`USE_FIXTURE_LLM=1`, so a production build never bundles or reads them.
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc
