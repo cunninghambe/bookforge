@@ -1,0 +1,26 @@
+node_modules/
+.next/
+out/
+build/
+
+# Local env
+.env
+.env.local
+.env*.local
+
+# Database and backups
+data/
+*.db
+*.db-shm
+*.db-wal
+backups/
+
+# Test artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+coverage/
+
+# OS / editor
+.DS_Store
+*.log
