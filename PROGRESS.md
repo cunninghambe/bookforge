@@ -364,3 +364,97 @@ timeline and effective for the next chapter's assembled prompt." All covered.
   call; enforced on both client and server; nothing auto-approves.
 - D28: Keyboard parity (a/r) for fact and state proposals now; full keyboard-driven
   navigation is a Phase 6 importer concern.
+
+---
+
+## Phase 6: Backfill importer and export
+
+Status: COMPLETE. All tests green.
+
+### What was built
+
+- Shared lock-time flow (`src/lib/lockFlow.ts`): `generateAndStoreSummary` and
+  `runCanonExtraction` are the exact Phase 5 summary-generation and
+  canon-extraction logic, pulled out of the `/lock` and `/extract-canon` route
+  handlers (which now call them) so the importer reuses the identical
+  implementation rather than a second copy. Both routes' behavior and existing
+  tests are unchanged.
+- `createChapterAtOrder` (`src/lib/repo/chapters.ts`): creates a chapter directly
+  in `locked` status at a confirmed `order_index`. Every existing chapter at or
+  after that index shifts down by one inside a single transaction (order_index
+  carries no uniqueness constraint, so the shift order does not matter). The
+  chapter is never observable in an unlocked state, even if the summary or
+  extraction call that follows throws.
+- Route `POST /api/projects/[id]/import`
+  (`src/app/api/projects/[id]/import/route.ts`): validates title and pasted text,
+  clamps the confirmed order to `[0, existingChapterCount]`, creates the chapter
+  (locked, single draft version via `createDraftVersion`), then runs
+  `generateAndStoreSummary` and `runCanonExtraction` in sequence and returns the
+  proposals. Approval itself is the existing `POST /api/extractions/approve`
+  gate, called unmodified from the client.
+- Export module (`src/lib/export.ts`, `buildExport`): concatenates `locked`
+  chapters (latest draft version each) in `order_index` order into one Markdown
+  document, `#` book title followed by `##` per chapter heading. A book with no
+  locked chapters still produces a valid, readable document (title heading plus a
+  placeholder line) rather than an empty string.
+- Route `GET /api/projects/[id]/export` streams that document back with
+  `Content-Disposition: attachment` and a filename slugified from the book title.
+- Import page `/book/[projectId]/import` and `ImportPanel`
+  (`src/components/ImportPanel.tsx`): paste form (title, confirmed order, chapter
+  text), then the same fact/state approval checklist shape as `LockPanel`, but
+  with full keyboard navigation across the combined proposal list (ArrowUp/
+  ArrowDown move focus between rows, a/r approve/reject the focused row, the
+  richer nav D28 deferred to here). Finishing a chapter ("Done, next chapter")
+  clears the form, advances the default next order, refocuses the title field,
+  and increments a running "imported this session" count, so the page is
+  immediately ready for the next paste.
+- Book page (`/book/[projectId]`) gained an "Import chapter" link and an "Export
+  book" button/link (`data-testid="export-button"`, a plain anchor to the export
+  route; the browser handles the download from the `Content-Disposition`
+  header).
+
+### Test results
+
+- Unit (vitest): 84 passed (was 75; +9: 4 in `import.test.ts` covering
+  `createChapterAtOrder` locked-at-confirmed-order creation, mid-list insertion
+  shifting the rest, end-append stability, and per-book isolation; 5 in
+  `export.test.ts` covering ordered concatenation with headings, reorder plus
+  latest-draft-version selection, exclusion of non-locked statuses, the
+  empty-book document, and filename slugification).
+- E2E (Playwright): 24 passed (was 21; +3 in `phase6.spec.ts`): importing a
+  chapter shows the summary and proposals and, driven with the keyboard only
+  (arrows plus a/r, including an explicit reject-then-reapprove round trip),
+  approving one fact and one state lands them as locked canon and in the
+  character's timeline; importing three chapters back-to-back proves the form
+  resets (cleared, refocused, count incremented) each time with no manual
+  cleanup between pastes; exporting two locked chapters downloads a single
+  Markdown file containing both chapter headings and their text in reading
+  order.
+- `tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Phase 6)
+
+"import three chapters back-to-back with keyboard-driven approvals in under ten
+minutes of user time; export produces a single Markdown file in reading order."
+The E2E suite proves the mechanical part (uninterrupted repeat flow, keyboard-only
+approval, correct reading order); wall-clock time is a UX property of the built
+flow (no confirmation dialogs, no page reloads, no dead clicks between chapters),
+not something a test asserts.
+
+### Judgment calls (mirrored in DECISIONS.md)
+
+- D29: `generateAndStoreSummary` / `runCanonExtraction` extracted into
+  `src/lib/lockFlow.ts` and reused by `/lock`, `/extract-canon`, and the importer.
+- D30: `createChapterAtOrder` sets status `locked` at creation time, not after the
+  summary call succeeds, so a mid-flow failure cannot leave a half-imported
+  chapter in a status the rest of the app does not expect.
+- D31: Export heading levels (`#` book title, `##` per chapter) and the
+  empty-book document; filename slugified from the book title.
+- D32: The import approval checklist is its own component (`ImportPanel`), not a
+  reuse of `LockPanel`, because Phase 6 requires full arrow-key row navigation
+  that D28 deliberately deferred to here; both share the same proposal shape and
+  the same `/api/extractions/approve` gate.
+- D33: Confirmed order is a plain 0-based `order_index` number input, clamped
+  server-side to `[0, existingChapterCount]`; the client's default value is a
+  local running count, but the server is the source of truth for the clamp and
+  the shift.

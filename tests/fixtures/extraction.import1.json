@@ -1,0 +1,3 @@
+{
+  "text": "{\n  \"facts\": [\n    { \"type\": \"timeline_event\", \"content\": \"The harbor shipment was diverted on Bellamy's order three nights before Mara's visit.\", \"evidence_quote\": \"diverted three nights earlier on Bellamy's order\" }\n  ],\n  \"states\": [\n    { \"character\": \"Mara\", \"knows\": \"that Bellamy diverted the harbor shipment\", \"feels\": \"suspicious of Bellamy\", \"hiding\": \"what she found, from Bellamy\", \"evidence_quote\": \"she pockets the receipt and says nothing\" }\n  ]\n}"
+}

@@ -2,12 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getChapter } from "@/lib/repo/chapters";
 import { latestDraft } from "@/lib/repo/drafts";
-import { assemblableCanon } from "@/lib/repo/canon";
-import { listCharacters } from "@/lib/repo/characters";
-import { logLlmCall } from "@/lib/repo/llm";
-import { getLlmClient } from "@/lib/llm/client";
-import { extractionPrompt } from "@/lib/llm/prompts";
-import { parseExtractionResponse } from "@/lib/llm/extraction";
+import { runCanonExtraction } from "@/lib/lockFlow";
 
 // Runs canon extraction on a chapter's final text (SPEC section 6 + Amendment A1).
 // UTILITY_MODEL (purpose "extraction") reads the text plus the current canon and
@@ -38,34 +33,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const fixtureKey =
     typeof body.fixtureKey === "string" ? body.fixtureKey : undefined;
 
-  const currentCanon = assemblableCanon(db, {
-    projectId: chapter.projectId,
-  }).map((f) => `[${f.type}] ${f.content}`);
-  const knownCharacters = listCharacters(db).map((c) => c.name);
-
-  const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
-  const res = await client.complete({
-    purpose: "extraction",
-    model,
-    prompt: extractionPrompt({
-      chapterTitle: chapter.title ?? `Chapter ${chapter.orderIndex + 1}`,
-      pov: chapter.pov ?? "omniscient",
-      text: draft.content,
-      currentCanon,
-      knownCharacters,
-    }),
-    maxTokens: 2048,
-    fixtureKey,
-  });
-  logLlmCall(db, {
-    purpose: "extraction",
-    chapterId,
-    inputTokens: res.inputTokens,
-    outputTokens: res.outputTokens,
-  });
-
-  const parsed = parseExtractionResponse(res.text);
+  const parsed = await runCanonExtraction(db, chapter, draft.content, fixtureKey);
   if (!parsed.ok) {
     return NextResponse.json(
       { ok: false, error: parsed.error, raw: parsed.raw },

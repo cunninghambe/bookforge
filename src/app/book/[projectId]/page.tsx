@@ -21,13 +21,30 @@ export default async function BookPage({
       <TopNav active="books" />
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">{project.title}</h1>
-        <Link
-          href={`/book/${project.id}/sweep`}
-          data-testid="sweep-link"
-          className="text-sm text-neutral-500 hover:underline"
-        >
-          Consistency sweep
-        </Link>
+        <div className="flex gap-4 text-sm text-neutral-500">
+          <Link
+            href={`/book/${project.id}/import`}
+            data-testid="import-link"
+            className="hover:underline"
+          >
+            Import chapter
+          </Link>
+          <Link
+            href={`/book/${project.id}/sweep`}
+            data-testid="sweep-link"
+            className="hover:underline"
+          >
+            Consistency sweep
+          </Link>
+          <a
+            href={`/api/projects/${project.id}/export`}
+            data-testid="export-button"
+            download
+            className="hover:underline"
+          >
+            Export book
+          </a>
+        </div>
       </div>
       <p className="mb-4 text-sm text-neutral-500">
         Order the chapters, set synopsis and beats, then interrogate a chapter to

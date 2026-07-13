@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, sql } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
 
@@ -127,6 +127,54 @@ export function updateChapter(
 
 export function deleteChapter(db: Db, id: number): void {
   db.delete(schema.chapters).where(eq(schema.chapters.id, id)).run();
+}
+
+export interface ImportChapterInput {
+  projectId: number;
+  title: string;
+  orderIndex: number;
+}
+
+// Creates a chapter directly in 'locked' status at a confirmed order position
+// (SPEC section 7, the backfill importer). The chapter is never observable in an
+// unlocked state, even if a later step in the importer fails. Every existing
+// chapter at or after orderIndex shifts down by one; order_index carries no
+// uniqueness constraint, so the shift can be applied in any order inside one
+// transaction.
+export function createChapterAtOrder(db: Db, input: ImportChapterInput): Chapter {
+  let created!: Chapter;
+  db.transaction((tx) => {
+    const toShift = tx
+      .select()
+      .from(schema.chapters)
+      .where(
+        and(
+          eq(schema.chapters.projectId, input.projectId),
+          gte(schema.chapters.orderIndex, input.orderIndex),
+        ),
+      )
+      .all();
+    for (const c of toShift) {
+      tx.update(schema.chapters)
+        .set({ orderIndex: c.orderIndex + 1 })
+        .where(eq(schema.chapters.id, c.id))
+        .run();
+    }
+    const row = tx
+      .insert(schema.chapters)
+      .values({
+        projectId: input.projectId,
+        orderIndex: input.orderIndex,
+        title: input.title,
+        beats: JSON.stringify([]),
+        dependencies: JSON.stringify([]),
+        status: "locked",
+      })
+      .returning()
+      .get();
+    created = decode(row);
+  });
+  return created;
 }
 
 // Persist a new order. orderedIds is the full list of this book's chapter ids in

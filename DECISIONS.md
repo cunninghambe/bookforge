@@ -286,6 +286,81 @@ checkbox checklist as the primary mechanism.
 
 ---
 
+## Phase 6
+
+### D29: Lock-time flow shared via `src/lib/lockFlow.ts`, not duplicated for the importer
+
+The Phase 6 task explicitly requires reusing the lock-time extraction flow (SPEC
+section 7, Amendment A1) rather than re-implementing it. `generateAndStoreSummary`
+and `runCanonExtraction` are pulled out of the `/api/chapters/[id]/lock` and
+`/api/chapters/[id]/extract-canon` route bodies verbatim (same prompts, same
+`purpose` strings, same `logLlmCall` calls, same fixture-key passthrough) into
+`src/lib/lockFlow.ts`. Both routes now call these functions; their request
+validation (draft exists, comments resolved) stays in the route since it is
+specific to the lock button, not to the underlying flow. `POST
+/api/projects/[id]/import` calls the same two functions after creating the
+chapter and its draft. This is one implementation with three callers, not three
+implementations.
+
+### D30: Imported chapters are `locked` from the moment of creation
+
+`createChapterAtOrder` sets `status: 'locked'` directly, before the summary or
+extraction LLM calls run, rather than starting the chapter in some other status
+and promoting it to `locked` only after `generateAndStoreSummary` succeeds (which
+also sets `status: 'locked'`, redundantly but harmlessly). Reasoning: SPEC section
+7 says the importer should "save as a LOCKED chapter with a single draft version,
+then run the same summary + canon extraction flow." If chapter creation instead
+deferred locking until after the summary call, a transient LLM failure between
+chapter creation and summary generation would leave a chapter with a draft but no
+locked status and no summary, a state the rest of the app (export, sweep,
+assembler) does not expect and has no UI to recover from. Locking at creation
+means the chapter is always in a valid, exportable state the instant it exists;
+worst case on an LLM failure is a locked chapter with no summary yet, which the
+existing `/unlock` path can already repair (D24).
+
+### D31: Export heading levels, and the empty-book document
+
+SPEC section 8 leaves the heading level a judgment call ("# or ## per chapter
+title"). Chosen: the book title is a single `#` at the top, and each chapter is
+`##`, so the concatenation reads as one document (a book with chapters) rather
+than a flat sequence of equally-weighted headings. A book with no locked chapters
+still produces `# <title>\n\n(no locked chapters yet)\n` rather than an empty
+string, since "sensible empty document" implies something a human opening the
+file would recognize as the (empty) book, not a zero-byte file. The filename is
+the book title lowercased, non-alphanumeric runs collapsed to a single hyphen,
+trimmed of leading/trailing hyphens, falling back to `book.md` if that produces
+nothing (e.g. a title that is entirely punctuation).
+
+### D32: The import approval checklist is a new component, not a reuse of LockPanel
+
+D28 (Phase 5) deliberately deferred "full keyboard-driven navigation (arrow
+navigation between rows, batch approval)" to the Phase 6 importer, where it is an
+explicit acceptance requirement. `ImportPanel` is therefore its own component
+rather than `LockPanel` reused with new props: it needs arrow-key focus movement
+across a combined facts-then-states row list (LockPanel's rows are independently
+focusable but have no arrow navigation between them), plus the paste form, the
+running session count, and the finish/reset flow, none of which apply to the
+review page LockPanel lives on. Both components render the same proposal shape
+(fact rows with type/content/evidence, state rows with knows/feels/hiding,
+character mapping, and inline character creation) and submit to the same,
+unmodified `POST /api/extractions/approve` gate: the approval mechanism is one
+implementation; only the checklist UI around it is duplicated, and only because
+the two pages have genuinely different interaction requirements.
+
+### D33: Confirmed order is a 0-based order_index number, clamped server-side
+
+"Confirm title and order" (SPEC section 7) does not specify a UI shape. Chosen:
+a plain number input for the target `order_index` (0 = first), defaulting to
+append-at-the-end, shown alongside the count of existing chapters for reference.
+The server clamps whatever value arrives to `[0, existingChapterCount]` so a
+stale or out-of-range client value cannot create a gap or silently fail; the
+client's own running count is a UI convenience for computing the next default,
+not a source of truth. Inserting between existing chapters shifts every chapter
+at or after the target index by one `order_index`, in the same transaction as the
+insert (D30's `createChapterAtOrder`).
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

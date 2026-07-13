@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { getChapter, updateChapter } from "@/lib/repo/chapters";
+import { getChapter } from "@/lib/repo/chapters";
 import { latestDraft } from "@/lib/repo/drafts";
 import { listUnresolvedComments } from "@/lib/repo/comments";
-import { logLlmCall } from "@/lib/repo/llm";
-import { getLlmClient } from "@/lib/llm/client";
-import { summaryPrompt } from "@/lib/llm/prompts";
+import { generateAndStoreSummary } from "@/lib/lockFlow";
 
 // Locks a chapter (SPEC section 6). Enabled only when every comment on the latest
 // draft is resolved. Generates and stores the chapter summary (UTILITY_MODEL,
@@ -42,27 +40,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const fixtureKey =
     typeof body.fixtureKey === "string" ? body.fixtureKey : undefined;
 
-  const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
-  const res = await client.complete({
-    purpose: "summary",
-    model,
-    prompt: summaryPrompt({
-      chapterTitle: chapter.title ?? `Chapter ${chapter.orderIndex + 1}`,
-      pov: chapter.pov ?? "omniscient",
-      text: draft.content,
-    }),
-    maxTokens: 512,
+  const { chapter: updated, summary } = await generateAndStoreSummary(
+    db,
+    chapter,
+    draft.content,
     fixtureKey,
-  });
-  logLlmCall(db, {
-    purpose: "summary",
-    chapterId,
-    inputTokens: res.inputTokens,
-    outputTokens: res.outputTokens,
-  });
-
-  const summary = res.text.trim();
-  const updated = updateChapter(db, chapterId, { summary, status: "locked" });
+  );
   return NextResponse.json({ chapter: updated, summary });
 }
