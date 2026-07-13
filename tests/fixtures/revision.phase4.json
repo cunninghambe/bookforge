@@ -1,0 +1,5 @@
+{
+  "text": "Mara climbed the tower stairs, taking them two at a time.\n\nThe stairwell smelled of damp stone and old smoke, and every landing looked exactly like the one below it, so that after a while she stopped trusting her own count and simply climbed, one foot after the other, until the walls seemed to lean inward and the air went thin and cold.\n\nKessa had left a lantern burning by the door, and the smell of hot oil hung in the stairwell.\n\nShe had not expected the light. She had expected the dark, and the waiting, and the cold.\n\nThe city below was dark, the way it always went dark before the tithe bells.\n\n[CONSISTENCY FIXES]:\n- Renamed \"Kesh\" to \"Kessa\" for consistency with the flagged correction.",
+  "inputTokens": 900,
+  "outputTokens": 700
+}

@@ -121,9 +121,80 @@ before locking. The rule is enforced, not softened.
 
 ---
 
+## Phase 4
+
+### D15: Pending revisions persist in a new `revisions` table
+
+The gap between /revise (produce the revised text and diff analysis) and /resolve
+(accept or reject hunks, save a new version) needs somewhere to hold the old text,
+the new text, the flagged spans, and the declared consistency fixes. Options were a
+client round-trip (echo everything back on resolve) or server persistence. A table
+is the simpler compliant choice: it survives a page reload, keeps the large text
+bodies off the wire twice, and lets /resolve recompute the diff deterministically
+rather than trusting client-supplied hunks. Added `revisions` with an idempotent
+`CREATE TABLE IF NOT EXISTS` in migrate.ts and a Drizzle definition in schema.ts.
+The diff is never stored; it is recomputed from old_text, new_text, flagged_spans,
+and consistency_fixes at resolve time, so hunk indices are stable.
+
+### D16: Flagged span location uses the cached offset as a hint, else first search
+
+SPEC: quoted_text is the source of truth; offsets are cached best-effort and
+recomputed by string search on load. `findSpan(text, quotedText, hint)` trusts the
+cached offset only when the text still sits there verbatim (which disambiguates a
+phrase that repeats), and otherwise falls back to the first `indexOf` occurrence.
+The same helper anchors comments on load and locates flagged spans for the diff
+classifier, so both agree.
+
+### D17: Line-based diff, word-level refinement for display, segment-walk rebuild
+
+`analyzeRevision` runs `diffLines` and groups consecutive changed parts into hunks,
+tracking each hunk's char range in the old text. Each hunk also carries a
+`diffWordsWithSpace` refinement purely for side-by-side rendering; classification
+and reconstruction use the line hunks only. Reconstruction walks the same ordered
+segments (common runs and hunks) and emits either the old or the new side per hunk,
+which guarantees that accepting every hunk reproduces newText exactly and rejecting
+one restores oldText exactly for that span while keeping the others. This is unit
+tested directly.
+
+### D18: Declared-fix matching heuristic, and authorized beats declared
+
+A changed hunk is AUTHORIZED if its old range overlaps a flagged span widened by a
+200-character tolerance window on each side (overlap test, so pure insertions at a
+point count). Authorization is checked first. If not authorized, a hunk is DECLARED
+when a token drawn from a [CONSISTENCY FIXES] entry appears in the hunk's changed
+text; tokens are the quoted substrings in the entry (the strongest signal, since the
+model names what it changed) plus capitalized words of length four or more. Anything
+else is UNAUTHORIZED. The heuristic is deliberately conservative: quoted tokens make
+false positives unlikely, and a miss only means a real fix shows up as an
+unauthorized change for the author to accept, which is the safe direction.
+
+### D19: Only unresolved comments are flagged spans for a revision
+
+"Revise flagged spans" acts on the open comments. Resolved comments are excluded
+from the flagged-span set sent to the model and from the authorization windows, so a
+resolved note never silently authorizes a change.
+
+### D20: A revision saves a new draft version and drops comments
+
+Per SPEC, resolving a revision calls `createDraftVersion` (a new immutable version)
+rather than mutating the working draft, and comments do not carry forward: the UI
+clears the panel and the new version starts with no comments, matching the span
+anchoring rule that comments belong to a specific immutable version.
+
+### D21: Revision output is linted for em-dashes exactly like drafting
+
+The revise route hard-rejects an em-dash in the model output and auto-retries once
+with an explicit instruction; if the retry is still dirty it surfaces an
+`emDashUnresolved` warning in the review panel and never silently accepts it. This
+mirrors the drafting pipeline so the forbidden-character rule holds on both paths.
+
+---
+
+---
+
 ## Spec amendments accepted mid-build
 
-### D15: Amendment A1, character-state extraction at lock time (2026-07-13)
+### D22: Amendment A1, character-state extraction at lock time (2026-07-13)
 
 Proposed during the Phase 3 stop while discussing character chatbots: the chatbot
 idea stays deferred, but its prerequisite (dense, automatically maintained
@@ -167,7 +238,7 @@ you say in this situation") before drafting. Guardrail: chat is ephemeral; nothi
 enters canon except through an explicit propose-as-provisional-fact button that
 uses the normal approval gate. Runs on UTILITY_MODEL, logged to llm_calls. Its
 prerequisite (dense character states) was accepted separately as amendment A1; see
-D15.
+D22.
 
 ### MCP server exposing BookForge
 

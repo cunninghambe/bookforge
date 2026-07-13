@@ -204,3 +204,84 @@ as alerts." All covered by unit + E2E with the Anthropic client mocked.
   block. Revisit if cross-book drafting needs richer prior-book context.
 - D13: One draft fixture (`draft.emdash.json`) intentionally contains a U+2014 as
   negative-test input for the em-dash linter. It is test-only, never shipped prose.
+
+---
+
+## Phase 4: Review and revision with diff enforcement
+
+Status: COMPLETE. All tests green.
+
+### What was built
+
+- Diff enforcement module (`src/lib/revision/diff.ts`), the core of the phase and a
+  pure, unit-tested unit. `analyzeRevision` computes a line-based diff
+  (`diffLines`) with per-hunk word-level refinement (`diffWordsWithSpace`), groups
+  changes into hunks with their old-text char ranges, and classifies each as
+  AUTHORIZED (overlaps a flagged span within a 200-char tolerance window),
+  DECLARED (matches a [CONSISTENCY FIXES] entry), or UNAUTHORIZED. `applyResolution`
+  reconstructs the final text by walking the same segments; accepting every hunk
+  reproduces the new text exactly, rejecting one restores the old text for that span
+  while keeping the others.
+- Span anchoring (`src/lib/revision/spans.ts`): `findSpan` recomputes a span by
+  string search, using the cached offset as a hint only when the text still matches
+  there. Shared by comment recompute and the diff classifier.
+- Consistency-fix extraction added to `src/lib/llm/markers.ts`
+  (`extractConsistencyFixes`), stripping the trailing [CONSISTENCY FIXES] block from
+  the prose the same way the [MISSING FACT] / [CANON TENSION] markers are stripped.
+- Comments repo (`src/lib/repo/comments.ts`): create, list with recomputed offsets,
+  list-unresolved, update (edit/resolve). Revisions repo
+  (`src/lib/repo/revisions.ts`) over a new `revisions` table (idempotent DDL in
+  migrate.ts, Drizzle def in schema.ts) that holds the pending old/new text, flagged
+  spans, and declared fixes between /revise and /resolve.
+- Routes: `POST` + `GET` `/api/drafts/[id]/comments`, `PATCH /api/comments/[id]`,
+  `POST /api/drafts/[id]/revise` (streams the revised text then a control frame with
+  the revision id and classified hunks, same protocol as the draft route, with the
+  same em-dash reject-and-retry lint), and `POST /api/revisions/[id]/resolve`
+  (requires every unauthorized hunk resolved, then saves a new draft version and
+  marks the revision resolved).
+- Review page `/book/[projectId]/chapter/[chapterId]/review` and its client
+  `ReviewEditor`: read-only prose with span selection to attach comments, a comments
+  side panel with resolve, a "Revise flagged spans" button (enabled only with at
+  least one unresolved comment), an unauthorized-change panel with side-by-side
+  old/new and per-hunk accept/reject, and save gated on all unauthorized hunks being
+  resolved. A "Review and revise" link was added to the draft page.
+- Revision fixtures under `tests/fixtures`: `revision.phase4.json` (in-span fix,
+  declared consistency fix, and an undeclared out-of-span edit, ending in a
+  [CONSISTENCY FIXES] block) plus `revision.emdashrev.json` and its `.retry` for the
+  em-dash lint. `phase4.case.json` holds the source text and expected accept/reject
+  results so the E2E and the fixture stay in sync (both generated from one set of
+  constants).
+
+### Test results
+
+- Unit (vitest): 58 passed (was 46; +12: 8 in revision-diff.test.ts covering
+  in-span/tolerance/undeclared/declared classification and exact accept/reject
+  reconstruction, 4 in comments.test.ts covering offset recompute, absent-quote,
+  hint disambiguation, and resolve).
+- E2E (Playwright): 17 passed (was 13; +4): the unauthorized panel catches ONLY the
+  undeclared out-of-span edit while the in-span fix and the declared consistency fix
+  pass; rejecting the hunk yields the exact expected new-version text; accepting it
+  yields the full revised text; a revision em-dash triggers a retry and the saved
+  text is clean.
+- `tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Phase 4)
+
+"select text, attach comments, run revision, deliberately induce an out-of-span
+change and confirm the unauthorized-change panel catches unrelated edits while
+[CONSISTENCY FIXES] entries pass; accept/reject per hunk produces the correct final
+text as a new version." All covered by the E2E and unit tests above.
+
+### Judgment calls (mirrored in DECISIONS.md)
+
+- D15: Pending revisions persist in a new `revisions` table; the diff is recomputed
+  deterministically at resolve time rather than trusted from the client.
+- D16: Flagged span location trusts the cached offset as a hint, else first search.
+- D17: Line-based diff with word-level refinement for display; segment-walk rebuild
+  guarantees exact accept/reject reconstruction.
+- D18: Declared-fix matching heuristic (quoted and proper-noun tokens); authorized
+  is checked before declared; 200-char tolerance as a window-overlap test.
+- D19: Only unresolved comments count as flagged spans for a revision.
+- D20: A revision saves a new draft version; comments do not carry forward.
+- D21: Revision output is em-dash linted exactly like drafting (reject, retry once,
+  then warn, never silently accept).

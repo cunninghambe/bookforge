@@ -101,6 +101,26 @@ export const questions = sqliteTable("questions", {
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 });
 
+// A pending revision awaiting hunk resolution (Phase 4). Holds the old and new
+// text plus the flagged spans and declared consistency fixes, so the diff analysis
+// is recomputed deterministically at resolve time. Resolving creates a new draft
+// version and marks the revision resolved.
+export const revisions = sqliteTable("revisions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  draftId: integer("draft_id")
+    .notNull()
+    .references(() => drafts.id),
+  chapterId: integer("chapter_id")
+    .notNull()
+    .references(() => chapters.id),
+  oldText: text("old_text").notNull(),
+  newText: text("new_text").notNull(),
+  flaggedSpans: text("flagged_spans").notNull(), // JSON array
+  consistencyFixes: text("consistency_fixes").notNull(), // JSON array of strings
+  status: text("status").notNull().default("pending"), // pending | resolved
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
 // Cost / drift logging for every LLM call.
 export const llmCalls = sqliteTable("llm_calls", {
   id: integer("id").primaryKey({ autoIncrement: true }),

@@ -90,6 +90,18 @@ export function migrate(sqlite: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS revisions (
+      id INTEGER PRIMARY KEY,
+      draft_id INTEGER NOT NULL REFERENCES drafts(id),
+      chapter_id INTEGER NOT NULL REFERENCES chapters(id),
+      old_text TEXT NOT NULL,
+      new_text TEXT NOT NULL,
+      flagged_spans TEXT NOT NULL,
+      consistency_fixes TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','resolved')),
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS llm_calls (
       id INTEGER PRIMARY KEY,
       purpose TEXT NOT NULL,
