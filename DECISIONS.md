@@ -127,3 +127,31 @@ Image generation; multi-user/accounts beyond the shared password; story-arc
 visualizations or tension graphs; export formats beyond concatenated Markdown;
 mobile layout; real-time collaboration, comment threads, version branching beyond
 linear draft versions.
+
+## Deferred feature ideas (author-proposed mid-build, not in SPEC v1)
+
+Recorded 2026-07-13 during the Phase 3 stop. Not built in this run per the SPEC
+rule against unspecced features; candidates for a v1.1 spec amendment after
+Phase 7.
+
+### Character chatbots
+
+Per-character chat seeded from the character card (voice_rules, role, physical,
+notes), the locked style rules, and the character's effective state as of a chosen
+chapter N (existing `effectiveState` + `priorLockedChapters` machinery). On opening
+a chat the bot asks "when in the book am I?" to pin N. Knowledge hygiene mirrors
+POV drafting: the bot knows only what the character knows at N, deflects
+in-character about what it is hiding at N, refuses post-N knowledge, and emits a
+missing-fact line instead of inventing. Primary use: voice audition ("what would
+you say in this situation") before drafting. Guardrail: chat is ephemeral; nothing
+enters canon except through an explicit propose-as-provisional-fact button that
+uses the normal approval gate. Runs on UTILITY_MODEL, logged to llm_calls.
+
+### MCP server exposing BookForge
+
+A local MCP server wrapping the repo layer (same functions the route handlers
+call): canon CRUD/lock, characters and states, chapters and reorder,
+interrogation, draft generation, sweep, import, export, character chat. Constraint
+carried over from the SPEC quality bar: extraction approval and revision hunk
+accept/reject stay human-only decisions; MCP may read proposals and reports but
+must not auto-approve either gate.
