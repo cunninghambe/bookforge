@@ -416,6 +416,72 @@ fails) instead of as a working-looking login page with a broken submit.
 
 ---
 
+## Amendment A2 (2026-07-13): UI chapter numbering convention and sweep errors
+
+### D39: One conversion module is the single boundary between 1-based UI and 0-based storage
+
+Amendment A2.1 requires a unit-tested pair of helpers to be "the single place the
+conversion happens". `src/lib/chapterNumbering.ts` exports
+`orderToUiChapter(order) = order + 1` and `uiChapterToOrder(uiChapter) = uiChapter - 1`,
+pure arithmetic, unit tested (both directions, round-trip, and the chapter-1 case).
+Every conversion site imports from here, including the display sites that previously
+inlined `orderIndex + 1` (the SweepRunner dropdowns and report, the sweep prompt's
+chapter number, and the fallback `Chapter N` titles in the assembler, export,
+lockFlow, the interrogate route, and the book pages). The Sequencer's row number
+stays `index + 1`: it is a list ordinal over the rendered array, not a conversion of
+a stored `order_index`, so routing it through the helper would misrepresent what it
+is. The extraction approval path (`chapter_order = order_index + 1` in
+`src/lib/repo/extraction.ts`) is internal 0-based arithmetic (a state effective from
+the chapter after the locked one, D22) and is explicitly out of scope, so it was left
+exactly as is.
+
+### D40: The character-state form converts client-side; the states route keeps its 0-based contract
+
+The amendment left the conversion boundary for the add-state form a judgment call
+(client before POST, or in the states API route). Chosen: convert client-side in
+`AddStateForm` (store `chapter_order = uiChapterToOrder(N)` in the request body) and
+display timelines with `orderToUiChapter`. `POST /api/characters/[id]/states`
+therefore keeps its existing contract: it receives and stores a raw 0-based
+`chapter_order`, identical to the DB column and identical to the other writer of
+`character_states` (the extraction-approve path, which also works in 0-based units).
+The alternative (converting inside the route) would have made two writers of the same
+table disagree on what the incoming number means and would have changed an API
+payload's semantics. Keeping one storage semantic across all writers, with the
+1-based convention living purely at the UI edge, is the simpler and safer boundary,
+and it changes no API payload that any test or other code relies on.
+
+### D41: The importer order field converts client-side too; the import route is unchanged
+
+Symmetrically, `ImportPanel` now presents a 1-based position (1 = first), defaulting
+to the next position at the end (existing count + 1), and converts with
+`uiChapterToOrder` before the POST. `POST /api/projects/[id]/import` still receives a
+0-based `orderIndex` and still clamps it to `[0, existingChapterCount]` server-side
+(D33), so the server remains the source of truth for the clamp and the shift and no
+route behavior changed.
+
+### D42: A sweep continues past a failed chapter; failures carry reasons
+
+Amendment A2.2. `SweepChapterReport` gains `error: string | null`. Each chapter's LLM
+call in `runSweep` is wrapped in try/catch: on failure it pushes a report entry
+naming the chapter and the error message and `continue`s to the next chapter, so one
+chapter's failure never aborts the rest of the run (decision recorded and unit
+tested: the run CONTINUES). Parse failures keep surfacing the raw model text
+unchanged. `POST /api/projects/[id]/sweep` wraps `runSweep` and returns the underlying
+message on a whole-run failure (`Sweep failed: <message>`, 500), and `SweepRunner`'s
+client-side fallback now shows either the route's message or the HTTP status, so the
+bare reasonless string "Sweep failed." is no longer reachable anywhere.
+
+### D43: The A2 e2e spec warms the dev server in beforeAll
+
+`a2.spec.ts` sorts before the phase specs, so it is the first file to hit the Next
+dev server and pays the cold route-compile cost that the phase suite previously
+absorbed with a lightweight first test. A `beforeAll` performs one full login and a
+`/characters` visit with a generous timeout so the per-test 20s login helper never
+races a cold compile. This is a warm-up only; no assertion, tolerance, or check was
+weakened.
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

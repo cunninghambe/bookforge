@@ -6,6 +6,7 @@ import { latestDraft } from "@/lib/repo/drafts";
 import { listComments } from "@/lib/repo/comments";
 import { listCharacters } from "@/lib/repo/characters";
 import { getProject } from "@/lib/repo/projects";
+import { orderToUiChapter } from "@/lib/chapterNumbering";
 import { TopNav } from "@/components/TopNav";
 import { ReviewEditor } from "@/components/ReviewEditor";
 
@@ -31,7 +32,7 @@ export default async function ReviewPage({
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">
           Review: {project.title}:{" "}
-          {chapter.title || `Chapter ${chapter.orderIndex + 1}`}
+          {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>
         <div className="flex gap-4 text-sm text-neutral-500">
           <Link href={`/book/${project.id}`} className="hover:underline">

@@ -7,11 +7,14 @@ import { logLlmCall } from "./repo/llm";
 import { sweepPrompt } from "./llm/prompts";
 import { parseSweepResponse, type Contradiction } from "./llm/extraction";
 import type { LlmClient } from "./llm/client";
+import { orderToUiChapter } from "./chapterNumbering";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
 // One chapter's slice of the sweep report. A parse failure surfaces the raw model
-// text instead of dropping the chapter (SPEC: parse defensively).
+// text instead of dropping the chapter (SPEC: parse defensively). A per-chapter LLM
+// call failure surfaces its error message and does not abort the remaining chapters
+// (Amendment A2.2).
 export interface SweepChapterReport {
   chapterId: number;
   order: number; // 1-based chapter number in the book
@@ -19,6 +22,7 @@ export interface SweepChapterReport {
   contradictions: Contradiction[];
   rawText: string | null; // set only when the response failed to parse
   parseError: string | null;
+  error: string | null; // set only when the LLM call itself threw (A2.2)
 }
 
 export interface SweepReport {
@@ -67,7 +71,7 @@ export async function runSweep(
     position += 1;
     const draft = latestDraft(db, chapter.id);
     const text = draft?.content ?? "";
-    const number = chapter.orderIndex + 1;
+    const number = orderToUiChapter(chapter.orderIndex);
     const title = chapter.title ?? `Chapter ${number}`;
 
     const prompt = sweepPrompt({
@@ -83,13 +87,30 @@ export async function runSweep(
       ? `${input.fixtureKey}.${position}`
       : undefined;
 
-    const res = await client.complete({
-      purpose: "sweep",
-      model: input.model,
-      prompt,
-      maxTokens: 2048,
-      fixtureKey,
-    });
+    // A2.2: a per-chapter LLM call failure becomes a report entry naming the
+    // chapter and the error message, and the loop continues to the remaining
+    // chapters rather than aborting the whole run.
+    let res;
+    try {
+      res = await client.complete({
+        purpose: "sweep",
+        model: input.model,
+        prompt,
+        maxTokens: 2048,
+        fixtureKey,
+      });
+    } catch (err) {
+      reports.push({
+        chapterId: chapter.id,
+        order: number,
+        title,
+        contradictions: [],
+        rawText: null,
+        parseError: null,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
     logLlmCall(db, {
       purpose: "sweep",
       chapterId: chapter.id,
@@ -106,6 +127,7 @@ export async function runSweep(
         contradictions: parsed.contradictions,
         rawText: null,
         parseError: null,
+        error: null,
       });
     } else {
       reports.push({
@@ -115,6 +137,7 @@ export async function runSweep(
         contradictions: [],
         rawText: parsed.raw,
         parseError: parsed.error,
+        error: null,
       });
     }
   }

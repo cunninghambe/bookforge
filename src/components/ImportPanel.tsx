@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { uiChapterToOrder } from "@/lib/chapterNumbering";
 
 const CANON_TYPES = [
   "world_rule",
@@ -78,7 +79,10 @@ export function ImportPanel({
 
   const [chapterCount, setChapterCount] = useState(existingChapters.length);
   const [title, setTitle] = useState("");
-  const [orderIndex, setOrderIndex] = useState(existingChapters.length);
+  // 1-based position (1 = first). Defaults to the next position at the end
+  // (existing count + 1). Converted to the stored 0-based order_index at the UI
+  // boundary via uiChapterToOrder (A2.1).
+  const [position, setPosition] = useState(existingChapters.length + 1);
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,7 +138,12 @@ export function ImportPanel({
     const res = await fetch(`/api/projects/${projectId}/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: title.trim(), content, orderIndex, fixtureKey }),
+      body: JSON.stringify({
+        title: title.trim(),
+        content,
+        orderIndex: uiChapterToOrder(position),
+        fixtureKey,
+      }),
     });
     setBusy(false);
     if (!res.ok) {
@@ -271,7 +280,7 @@ export function ImportPanel({
     const nextCount = chapterCount + 1;
     setImportedCount((n) => n + 1);
     setChapterCount(nextCount);
-    setOrderIndex(nextCount);
+    setPosition(nextCount + 1);
     setTitle("");
     setContent("");
     setChapterId(null);
@@ -322,15 +331,15 @@ export function ImportPanel({
         </label>
         <label className="mb-2 flex flex-col gap-1 text-sm">
           <span className="text-xs uppercase text-neutral-400">
-            Order (0 = first, {chapterCount} = last)
+            Position (1 = first, {chapterCount + 1} = last)
           </span>
           <input
             type="number"
             data-testid="import-order"
-            value={orderIndex}
-            min={0}
-            max={chapterCount}
-            onChange={(e) => setOrderIndex(Number(e.target.value))}
+            value={position}
+            min={1}
+            max={chapterCount + 1}
+            onChange={(e) => setPosition(Number(e.target.value))}
             disabled={hasResult || busy}
             className="w-24 rounded border border-neutral-300 px-2 py-1"
           />

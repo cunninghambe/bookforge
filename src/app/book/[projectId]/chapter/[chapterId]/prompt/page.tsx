@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { getChapter } from "@/lib/repo/chapters";
 import { getProject } from "@/lib/repo/projects";
 import { assemblePrompt } from "@/lib/assembler";
+import { orderToUiChapter } from "@/lib/chapterNumbering";
 import { TopNav } from "@/components/TopNav";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export default async function PromptInspectorPage({
       <TopNav active="books" />
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">
-          Assembled prompt: {chapter.title || `Chapter ${chapter.orderIndex + 1}`}
+          Assembled prompt: {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>
         <Link
           href={`/book/${project.id}/chapter/${chapter.id}/draft`}

@@ -6,6 +6,7 @@ import * as schema from "./db/schema";
 import { listChapters } from "./repo/chapters";
 import { latestDraft } from "./repo/drafts";
 import type { Project } from "./repo/projects";
+import { orderToUiChapter } from "./chapterNumbering";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -26,7 +27,7 @@ export function buildExport(db: Db, project: Project): ExportResult {
 
   const sections = locked.map((c) => {
     const draft = latestDraft(db, c.id);
-    const heading = c.title?.trim() || `Chapter ${c.orderIndex + 1}`;
+    const heading = c.title?.trim() || `Chapter ${orderToUiChapter(c.orderIndex)}`;
     const body = draft ? draft.content.trim() : "";
     return `## ${heading}\n\n${body}`;
   });

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getProject } from "@/lib/repo/projects";
 import { listChapters } from "@/lib/repo/chapters";
+import { orderToUiChapter } from "@/lib/chapterNumbering";
 import { TopNav } from "@/components/TopNav";
 import { SweepRunner } from "@/components/SweepRunner";
 
@@ -22,7 +23,7 @@ export default async function SweepPage({
     .map((c) => ({
       id: c.id,
       orderIndex: c.orderIndex,
-      title: c.title || `Chapter ${c.orderIndex + 1}`,
+      title: c.title || `Chapter ${orderToUiChapter(c.orderIndex)}`,
     }));
 
   return (

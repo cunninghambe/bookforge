@@ -13,14 +13,15 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "backup": "node scripts/backup.mjs"
+    "backup": "node scripts/backup.mjs",
+    "pretest:e2e": "node scripts/clean-test-db.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "better-sqlite3": "^11.8.1",
     "diff": "^7.0.0",
     "drizzle-orm": "^0.38.3",
-    "next": "15.1.6",
+    "next": "^15.5.20",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },

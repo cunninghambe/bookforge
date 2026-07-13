@@ -11,6 +11,7 @@ import { listCharacters, effectiveState } from "./repo/characters";
 import { latestDraft } from "./repo/drafts";
 import { getProject, listProjects } from "./repo/projects";
 import { draftSystemPrompt } from "./llm/prompts";
+import { orderToUiChapter } from "./chapterNumbering";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -235,7 +236,7 @@ function buildStorySoFar(db: Db, chapter: Chapter): string {
     return "(this is the first chapter; nothing has happened yet)";
   }
   for (const c of prior) {
-    const title = c.title ?? `Chapter ${c.orderIndex + 1}`;
+    const title = c.title ?? `Chapter ${orderToUiChapter(c.orderIndex)}`;
     const summary = c.summary
       ? truncateToWords(c.summary, SUMMARY_WORD_CAP)
       : "(no summary stored)";
@@ -249,7 +250,7 @@ function buildPreviousChapter(db: Db, chapter: Chapter): string {
   if (!prev) return "(no previous locked chapter)";
   const draft = latestDraft(db, prev.id);
   if (!draft) return "(previous chapter is locked but has no draft text)";
-  const title = prev.title ?? `Chapter ${prev.orderIndex + 1}`;
+  const title = prev.title ?? `Chapter ${orderToUiChapter(prev.orderIndex)}`;
   return `${title} (full text):\n${truncateFront(draft.content, PREV_CHAPTER_CHAR_CAP)}`;
 }
 
@@ -259,7 +260,7 @@ function buildCurrentChapter(
   targetSet: Set<number>,
   draftedSoFar: string | undefined,
 ): string {
-  const title = chapter.title ?? `Chapter ${chapter.orderIndex + 1}`;
+  const title = chapter.title ?? `Chapter ${orderToUiChapter(chapter.orderIndex)}`;
   const beatLines = chapter.beats.map((b, i) => {
     const mark = targetSet.has(i) ? ">> " : "   ";
     const tail = targetSet.has(i) ? "   <-- DRAFT THIS BEAT" : "";

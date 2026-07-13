@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { orderToUiChapter, uiChapterToOrder } from "@/lib/chapterNumbering";
 
 interface Project {
   id: number;
@@ -233,7 +234,7 @@ function CharacterCard({
               {states.map((s) => (
                 <li key={s.id} className="rounded bg-neutral-50 px-2 py-1">
                   <span className="text-neutral-400">
-                    {projTitle(s.projectId)} ch {s.chapterOrder}:{" "}
+                    {projTitle(s.projectId)} ch {orderToUiChapter(s.chapterOrder)}:{" "}
                   </span>
                   {s.knows && (
                     <span>
@@ -277,7 +278,9 @@ function AddStateForm({
   const [projectId, setProjectId] = useState<string>(
     projects[0] ? String(projects[0].id) : "",
   );
-  const [chapterOrder, setChapterOrder] = useState("1");
+  // 1-based chapter number as shown in the sequencer; converted to the stored
+  // 0-based chapter_order at the UI boundary (A2.1). Defaults to chapter 1.
+  const [uiChapter, setUiChapter] = useState("1");
   const [knows, setKnows] = useState("");
   const [feels, setFeels] = useState("");
   const [hiding, setHiding] = useState("");
@@ -291,7 +294,7 @@ function AddStateForm({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         projectId: Number(projectId),
-        chapterOrder: Number(chapterOrder),
+        chapterOrder: uiChapterToOrder(Number(uiChapter)),
         knows,
         feels,
         hiding,
@@ -306,27 +309,33 @@ function AddStateForm({
 
   return (
     <form onSubmit={submit} className="mt-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <select
-          aria-label="State book"
-          value={projectId}
-          onChange={(e) => setProjectId(e.target.value)}
-          className="rounded border border-neutral-300 px-2 py-1"
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={String(p.id)}>
-              {p.title}
-            </option>
-          ))}
-        </select>
-        <input
-          aria-label="State chapter order"
-          type="number"
-          min={1}
-          value={chapterOrder}
-          onChange={(e) => setChapterOrder(e.target.value)}
-          className="w-20 rounded border border-neutral-300 px-2 py-1"
-        />
+      <div className="flex items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-neutral-400">
+          Book
+          <select
+            aria-label="State book"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            className="rounded border border-neutral-300 px-2 py-1 text-sm normal-case tracking-normal text-neutral-900"
+          >
+            {projects.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-neutral-400">
+          Effective from chapter (1 = first)
+          <input
+            aria-label="Effective from chapter"
+            type="number"
+            min={1}
+            value={uiChapter}
+            onChange={(e) => setUiChapter(e.target.value)}
+            className="w-20 rounded border border-neutral-300 px-2 py-1 text-sm normal-case tracking-normal text-neutral-900"
+          />
+        </label>
       </div>
       <input
         aria-label="knows"

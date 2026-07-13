@@ -11,6 +11,7 @@ import { logLlmCall } from "@/lib/repo/llm";
 import { getLlmClient } from "@/lib/llm/client";
 import { parseJson } from "@/lib/llm/json";
 import { interrogationPrompt, normalizeQuestions } from "@/lib/llm/prompts";
+import { orderToUiChapter } from "@/lib/chapterNumbering";
 
 // Calls UTILITY_MODEL with the interrogation prompt, stores the returned questions,
 // and moves the chapter into the interrogating state.
@@ -25,7 +26,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     (f) => f.content,
   );
   const prompt = interrogationPrompt({
-    chapterTitle: chapter.title ?? `Chapter ${chapter.orderIndex + 1}`,
+    chapterTitle: chapter.title ?? `Chapter ${orderToUiChapter(chapter.orderIndex)}`,
     pov: chapter.pov ?? "omniscient",
     synopsis: chapter.synopsis ?? "",
     beats: chapter.beats,

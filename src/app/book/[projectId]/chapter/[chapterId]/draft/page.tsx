@@ -5,6 +5,7 @@ import { getDb } from "@/lib/db";
 import { getChapter } from "@/lib/repo/chapters";
 import { latestDraft } from "@/lib/repo/drafts";
 import { getProject } from "@/lib/repo/projects";
+import { orderToUiChapter } from "@/lib/chapterNumbering";
 import { TopNav } from "@/components/TopNav";
 import { DraftEditor } from "@/components/DraftEditor";
 
@@ -27,7 +28,7 @@ export default async function DraftPage({
       <TopNav active="books" />
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">
-          {project.title}: {chapter.title || `Chapter ${chapter.orderIndex + 1}`}
+          {project.title}: {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>
         <div className="flex gap-4 text-sm text-neutral-500">
           <Link href={`/book/${project.id}`} className="hover:underline">

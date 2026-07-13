@@ -39,12 +39,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   const client = getLlmClient();
   const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
-  const report = await runSweep(db, client, {
-    projectId,
-    fromOrder,
-    toOrder,
-    fixtureKey,
-    model,
-  });
-  return NextResponse.json({ report });
+  try {
+    const report = await runSweep(db, client, {
+      projectId,
+      fromOrder,
+      toOrder,
+      fixtureKey,
+      model,
+    });
+    return NextResponse.json({ report });
+  } catch (err) {
+    // A2.2: a whole-run failure surfaces the underlying error message so the UI
+    // never shows a bare "Sweep failed." with no reason. Per-chapter LLM failures
+    // are already caught inside runSweep and reported per chapter; this catches a
+    // failure of the run itself (for example loading canon or a draft).
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `Sweep failed: ${message}` },
+      { status: 500 },
+    );
+  }
 }

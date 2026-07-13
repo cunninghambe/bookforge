@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { orderToUiChapter } from "@/lib/chapterNumbering";
 
 interface LockedChapter {
   id: number;
@@ -23,6 +24,7 @@ interface ChapterReport {
   contradictions: Contradiction[];
   rawText: string | null;
   parseError: string | null;
+  error: string | null;
 }
 
 interface SweepReport {
@@ -75,7 +77,10 @@ export function SweepRunner({
     setRunning(false);
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? "Sweep failed.");
+      // A2.2: never a bare "Sweep failed." with no reason. The route returns the
+      // underlying message; if the body is somehow missing, fall back to the HTTP
+      // status so a reason is always shown.
+      setError(data.error ?? `Sweep failed (HTTP ${res.status}).`);
       return;
     }
     const data = (await res.json()) as { report: SweepReport };
@@ -104,7 +109,7 @@ export function SweepRunner({
           >
             {lockedChapters.map((c) => (
               <option key={c.id} value={c.orderIndex}>
-                {c.orderIndex + 1}. {c.title}
+                {orderToUiChapter(c.orderIndex)}. {c.title}
               </option>
             ))}
           </select>
@@ -120,7 +125,7 @@ export function SweepRunner({
           >
             {lockedChapters.map((c) => (
               <option key={c.id} value={c.orderIndex}>
-                {c.orderIndex + 1}. {c.title}
+                {orderToUiChapter(c.orderIndex)}. {c.title}
               </option>
             ))}
           </select>
@@ -177,7 +182,17 @@ export function SweepRunner({
                 <p className="mb-2 font-medium">
                   {c.order}. {c.title}
                 </p>
-                {c.parseError ? (
+                {c.error ? (
+                  <div
+                    data-testid={`sweep-error-${c.chapterId}`}
+                    className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-800"
+                  >
+                    <p className="uppercase tracking-wide text-red-700">
+                      Sweep failed for this chapter:
+                    </p>
+                    <p className="mt-1">{c.error}</p>
+                  </div>
+                ) : c.parseError ? (
                   <div>
                     <p className="text-xs uppercase text-amber-700">
                       Response did not parse. Raw output:

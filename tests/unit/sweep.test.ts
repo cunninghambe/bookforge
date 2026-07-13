@@ -79,6 +79,52 @@ describe("runSweep aggregation", () => {
     expect(rc?.rawText).toBe("the model wrote prose instead of JSON");
   });
 
+  it("a chapter whose LLM call throws yields an error entry and does not abort the remaining chapters (A2.2)", async () => {
+    const { db } = testDb();
+    const a = lockedChapterWithDraft(db, "A", "text a");
+    const b = lockedChapterWithDraft(db, "B", "text b");
+    const c = lockedChapterWithDraft(db, "C", "text c");
+
+    // Throws on the second call (chapter B), succeeds on the others.
+    let i = 0;
+    const client: LlmClient = {
+      async complete(): Promise<CompleteResult> {
+        i += 1;
+        if (i === 2) throw new Error("boom: model unavailable");
+        return { text: "[]", inputTokens: 1, outputTokens: 1 };
+      },
+      async *stream() {
+        return { text: "", inputTokens: 0, outputTokens: 0 };
+      },
+    };
+
+    const report = await runSweep(db, client, {
+      projectId: 1,
+      fromOrder: a.orderIndex,
+      toOrder: c.orderIndex,
+      model: "test-model",
+    });
+
+    // All three chapters are present: the failure did not abort the run.
+    expect(report.chapters).toHaveLength(3);
+    expect(report.totalContradictions).toBe(0);
+
+    const rb = report.chapters.find((r) => r.chapterId === b.id);
+    expect(rb?.error).toBe("boom: model unavailable");
+    expect(rb?.contradictions).toHaveLength(0);
+    expect(rb?.rawText).toBeNull();
+    expect(rb?.parseError).toBeNull();
+
+    // Chapter C, after the failed chapter, was still processed.
+    const rc = report.chapters.find((r) => r.chapterId === c.id);
+    expect(rc?.error).toBeNull();
+    expect(rc?.parseError).toBeNull();
+
+    // A successful chapter carries no error.
+    const ra = report.chapters.find((r) => r.chapterId === a.id);
+    expect(ra?.error).toBeNull();
+  });
+
   it("only sweeps locked chapters within the order range", () => {
     const { db } = testDb();
     const a = lockedChapterWithDraft(db, "A", "text");

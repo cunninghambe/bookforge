@@ -592,3 +592,87 @@ production-mode 503 gate in `src/middleware.ts`, and `scripts/backup.mjs`.
 - Not verified in this environment: the Docker image build (no Docker daemon)
   and any behavior against the real Anthropic API (all tests use fixtures by
   design). Both are called out in DEPLOY.md and the Phase 7 report.
+
+---
+
+## Amendment A2: UI chapter numbering convention and sweep error surfacing
+
+Status: COMPLETE. All tests green. Two fixes, no new features.
+
+### What was built
+
+A2.1, chapter numbering. The database stays 0-based everywhere
+(`chapters.order_index`, `character_states.chapter_order`; a state applies to
+chapters with `order_index >= chapter_order`). The UI now speaks 1-based chapter
+numbers, converting at the boundary through one module.
+
+- `src/lib/chapterNumbering.ts`: `orderToUiChapter(order) = order + 1` and
+  `uiChapterToOrder(uiChapter) = uiChapter - 1`. The single place the conversion
+  happens; every conversion site imports from here.
+- The character add-state form (`src/components/CharactersManager.tsx`,
+  `AddStateForm`) was the bug. It now labels the field "Effective from chapter
+  (1 = first)", defaults to 1, and stores
+  `chapter_order = uiChapterToOrder(N)` (converted client-side before the POST).
+  The state timeline row displays `ch {orderToUiChapter(chapter_order)}`. So a
+  state entered as chapter 1 on a book's first chapter (order_index 0) now stores
+  chapter_order 0 and applies to that chapter, the reported bug.
+- The importer order field (`src/components/ImportPanel.tsx`) is now a 1-based
+  position ("Position (1 = first, N = last)"), defaulting to the next position at
+  the end (existing count + 1), converted with `uiChapterToOrder` before the POST.
+  The `/api/projects/[id]/import` route is unchanged (still receives and clamps a
+  0-based `orderIndex`).
+- Audit of every other chapter-number surface: all were already 1-based, using an
+  inline `orderIndex + 1`. They were routed through `orderToUiChapter` so the
+  helper is the single conversion point: `SweepRunner` range dropdowns, the sweep
+  report `order`, the sweep prompt's `chapterNumber` (`src/lib/sweep.ts`), the
+  fallback chapter titles in `src/lib/assembler.ts`, `src/lib/export.ts`,
+  `src/lib/lockFlow.ts`, `src/app/api/chapters/[id]/interrogate/route.ts`, and the
+  book/sweep/import/draft/review/prompt pages. The Sequencer row number stays
+  `index + 1` (a list ordinal, not a stored order). The extraction approval path
+  (`src/lib/repo/extraction.ts`, `chapter_order = order_index + 1`) is internal
+  0-based arithmetic and was left untouched, per the amendment.
+
+A2.2, sweep errors carry reasons.
+
+- `src/lib/sweep.ts`: `SweepChapterReport` gains an `error: string | null`. Each
+  chapter's LLM call is wrapped in try/catch; on failure it pushes a report entry
+  naming the chapter and the error message and continues to the remaining chapters
+  (the run is not aborted). Parse failures keep their existing raw-text surfacing.
+- `src/app/api/projects/[id]/sweep/route.ts`: wraps `runSweep` and returns the
+  underlying message (`Sweep failed: <message>`, HTTP 500) on a whole-run failure.
+- `src/components/SweepRunner.tsx`: renders a per-chapter error region
+  (`data-testid="sweep-error-<id>"`); the whole-run error fallback now shows the
+  route's message or the HTTP status, so the bare reasonless "Sweep failed." is no
+  longer reachable.
+
+### Test results
+
+- Unit (vitest): 112 passed (was 107; +5). New: `chapterNumbering.test.ts` (4:
+  both helpers, round-trip, and the chapter-1-stores-order-0 case) and one in
+  `sweep.test.ts` (a chapter whose LLM call throws yields an error entry and does
+  not abort the remaining chapters).
+- E2E (Playwright): 27 passed (was 24; +3 in `a2.spec.ts`): the mandatory A2.1
+  regression (adding a state "effective from chapter 1" through the character form
+  on a book's first chapter makes its content appear in that chapter's assembled
+  prompt via `/api/dev/prompt/<id>`); the importer order field is 1-based; a sweep
+  where one chapter's fixture is missing reports that chapter with a reason and
+  still processes the next chapter (which reads clean).
+- `tsc --noEmit`: clean.
+
+### Existing tests updated
+
+None. The `phase1` character test drives the add-state form with its default
+value and asserts only the knows/feels text, never a "ch N" string, so the
+unchanged visible output (entering the default now stores 0 but still displays
+chapter 1) needed no edit. No other existing test drove the old UI semantics.
+
+### Judgment calls (mirrored in DECISIONS.md, D39-D43)
+
+- D39: One conversion module, used by every site; no other place converts.
+- D40: The character-state conversion happens client-side before the POST; the
+  states API route keeps its raw 0-based `chapter_order` contract.
+- D41: The importer conversion is also client-side; the import route is unchanged.
+- D42: A sweep continues past a failed chapter; per-chapter failures become report
+  entries; the whole-run failure surfaces its message; bare "Sweep failed." gone.
+- D43: `a2.spec.ts` has a `beforeAll` warm-up (it sorts first and pays the dev
+  server's cold-compile cost). Warm-up only, no assertion weakened.

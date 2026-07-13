@@ -13,6 +13,7 @@ import { logLlmCall } from "./repo/llm";
 import { assemblableCanon } from "./repo/canon";
 import { listCharacters } from "./repo/characters";
 import { updateChapter, type Chapter } from "./repo/chapters";
+import { orderToUiChapter } from "./chapterNumbering";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -30,7 +31,7 @@ export async function generateAndStoreSummary(
     purpose: "summary",
     model,
     prompt: summaryPrompt({
-      chapterTitle: chapter.title ?? `Chapter ${chapter.orderIndex + 1}`,
+      chapterTitle: chapter.title ?? `Chapter ${orderToUiChapter(chapter.orderIndex)}`,
       pov: chapter.pov ?? "omniscient",
       text,
     }),
@@ -69,7 +70,7 @@ export async function runCanonExtraction(
     purpose: "extraction",
     model,
     prompt: extractionPrompt({
-      chapterTitle: chapter.title ?? `Chapter ${chapter.orderIndex + 1}`,
+      chapterTitle: chapter.title ?? `Chapter ${orderToUiChapter(chapter.orderIndex)}`,
       pov: chapter.pov ?? "omniscient",
       text,
       currentCanon,
