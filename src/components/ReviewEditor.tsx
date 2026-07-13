@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { LockPanel } from "./LockPanel";
 
 const CONTROL_DELIM = "\n<<<BOOKFORGE_CTRL>>>\n";
 
@@ -58,10 +59,20 @@ export function ReviewEditor({
   draftId: initialDraftId,
   initialContent,
   initialComments,
+  chapterId,
+  projectId,
+  chapterStatus,
+  chapterSummary,
+  characters,
 }: {
   draftId: number;
   initialContent: string;
   initialComments: CommentView[];
+  chapterId: number;
+  projectId: number;
+  chapterStatus: string;
+  chapterSummary: string | null;
+  characters: Array<{ id: number; name: string }>;
 }) {
   const searchParams = useSearchParams();
   const fixtureKey = searchParams.get("fx") ?? undefined;
@@ -481,6 +492,16 @@ export function ReviewEditor({
             Add at least one unresolved comment to revise.
           </p>
         )}
+
+        <LockPanel
+          chapterId={chapterId}
+          projectId={projectId}
+          initialStatus={chapterStatus}
+          initialSummary={chapterSummary}
+          unresolvedCount={unresolvedCount}
+          characters={characters}
+          fixtureKey={fixtureKey}
+        />
       </aside>
     </div>
   );

@@ -72,6 +72,99 @@ ${rules}
 Return the complete revised chapter text.`;
 }
 
+// Summary generated at lock time. UTILITY_MODEL, ~150 words, factual, present
+// tense, includes canon-relevant developments. Returns plain prose, not JSON.
+export function summaryPrompt(args: {
+  chapterTitle: string;
+  pov: string;
+  text: string;
+}): string {
+  return `You are summarizing a locked chapter of a novel so later chapters can be drafted against it. Write a single paragraph of about 150 words in the present tense. Be factual and concrete: who does what, what changes, what is now known or decided. Prioritize developments that future chapters must not contradict (deaths, revelations, promises, movements, injuries, decisions). Do not editorialize or describe style. Do not use em-dashes.
+
+CHAPTER
+Title: ${args.chapterTitle}
+POV: ${args.pov}
+
+TEXT
+${args.text}
+
+Return only the summary paragraph. No preamble, no heading.`;
+}
+
+// Canon extraction at lock time (Amendment A1). Reads the final chapter text plus
+// the current canon list and proposes BOTH new durable facts AND character-state
+// deltas as a single JSON object. States are deltas only, never restatements.
+export function extractionPrompt(args: {
+  chapterTitle: string;
+  pov: string;
+  text: string;
+  currentCanon: string[];
+  knownCharacters: string[];
+}): string {
+  const canon = args.currentCanon.length
+    ? args.currentCanon.map((c) => `- ${c}`).join("\n")
+    : "(none yet)";
+  const chars = args.knownCharacters.length
+    ? args.knownCharacters.map((c) => `- ${c}`).join("\n")
+    : "(none tracked yet)";
+  return `You are extracting canon from a locked chapter. Read the final text and the current canon, then propose two things:
+
+1. New durable facts the chapter establishes. A durable fact is something future chapters must not contradict: a world rule, a timeline event, a lasting character fact, or an authorial plot decision. Do NOT propose scene details, mood, or phrasing. Do NOT restate facts already in the current canon.
+
+2. Character-state deltas: what a named character now knows, feels, or is hiding that changed in this chapter. Deltas only. Do NOT restate a state the character already had. Only propose states for characters that plausibly match the tracked characters listed below; use the exact tracked name when you can.
+
+CHAPTER
+Title: ${args.chapterTitle}
+POV: ${args.pov}
+
+TEXT
+${args.text}
+
+CURRENT CANON
+${canon}
+
+TRACKED CHARACTERS
+${chars}
+
+Return ONLY a JSON object with this exact shape, and nothing else:
+{
+  "facts": [
+    { "type": "world_rule | timeline_event | character_fact | plot_decision", "content": "the durable fact, one sentence", "evidence_quote": "a short verbatim quote from the text that supports it" }
+  ],
+  "states": [
+    { "character": "the character name", "knows": "new knowledge or empty", "feels": "shifted stance or empty", "hiding": "new secret or empty", "evidence_quote": "a short verbatim quote from the text" }
+  ]
+}
+Use an empty array for facts or states if there are none. Do not use em-dashes anywhere. No prose outside the JSON.`;
+}
+
+// Consistency sweep for one locked chapter. Sends the chapter text plus the full
+// locked canon and asks for contradictions ONLY, as a JSON array.
+export function sweepPrompt(args: {
+  chapterNumber: number;
+  chapterTitle: string;
+  text: string;
+  lockedCanon: string[];
+}): string {
+  const canon = args.lockedCanon.length
+    ? args.lockedCanon.map((c, i) => `[${i + 1}] ${c}`).join("\n")
+    : "(none)";
+  return `You are running an adversarial consistency sweep on one chapter of a novel. Compare the chapter text against the locked canon and report ONLY contradictions: places where the text states or implies something that conflicts with a locked fact. Do not report style, quality, or missing detail. If there are no contradictions, return an empty array.
+
+CHAPTER ${args.chapterNumber}: ${args.chapterTitle}
+TEXT
+${args.text}
+
+LOCKED CANON
+${canon}
+
+Return ONLY a JSON array with this exact shape, and nothing else:
+[
+  { "chapter": ${args.chapterNumber}, "quote": "the verbatim conflicting text from the chapter", "conflicting_fact": "the canon fact it conflicts with, or a one-line description", "severity": "low | medium | high" }
+]
+Return [] if there are no contradictions. Do not use em-dashes. No prose outside the JSON.`;
+}
+
 export interface InterrogationQuestion {
   question: string;
 }

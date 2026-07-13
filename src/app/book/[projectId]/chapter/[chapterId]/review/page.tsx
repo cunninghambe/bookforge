@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db";
 import { getChapter } from "@/lib/repo/chapters";
 import { latestDraft } from "@/lib/repo/drafts";
 import { listComments } from "@/lib/repo/comments";
+import { listCharacters } from "@/lib/repo/characters";
 import { getProject } from "@/lib/repo/projects";
 import { TopNav } from "@/components/TopNav";
 import { ReviewEditor } from "@/components/ReviewEditor";
@@ -22,6 +23,7 @@ export default async function ReviewPage({
   if (!chapter || !project) notFound();
   const draft = latestDraft(db, chapter.id);
   const comments = draft ? listComments(db, draft.id, draft.content) : [];
+  const characters = listCharacters(db).map((c) => ({ id: c.id, name: c.name }));
 
   return (
     <main>
@@ -54,6 +56,11 @@ export default async function ReviewPage({
             comment: c.comment,
             resolved: c.resolved === 1,
           }))}
+          chapterId={chapter.id}
+          projectId={project.id}
+          chapterStatus={chapter.status}
+          chapterSummary={chapter.summary}
+          characters={characters}
         />
       ) : (
         <p className="mt-6 text-sm text-neutral-500" data-testid="no-draft">

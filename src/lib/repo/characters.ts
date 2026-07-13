@@ -92,6 +92,9 @@ export interface StateInput {
   knows?: string | null;
   feels?: string | null;
   hiding?: string | null;
+  // 'manual' for UI-created states, 'extraction:<chapter_id>' for approved
+  // lock-time proposals. Defaults to 'manual'.
+  source?: string | null;
 }
 
 export function addState(db: Db, input: StateInput): CharacterState {
@@ -104,9 +107,23 @@ export function addState(db: Db, input: StateInput): CharacterState {
       knows: input.knows ?? null,
       feels: input.feels ?? null,
       hiding: input.hiding ?? null,
+      source: input.source ?? "manual",
     })
     .returning()
     .get();
+}
+
+// Finds a character by exact name, case-insensitive. Used to resolve extraction
+// state proposals to an existing character before approval (Amendment A1).
+export function findCharacterByName(
+  db: Db,
+  name: string,
+): Character | undefined {
+  const target = name.trim().toLowerCase();
+  if (!target) return undefined;
+  return listCharacters(db).find(
+    (c) => c.name.trim().toLowerCase() === target,
+  );
 }
 
 export function deleteState(db: Db, id: number): void {

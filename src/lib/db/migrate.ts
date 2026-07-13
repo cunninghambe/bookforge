@@ -111,6 +111,29 @@ export function migrate(sqlite: Database.Database): void {
       created_at TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  addColumnIfMissing(sqlite, {
+    table: "character_states",
+    column: "source",
+    // Nullable with a 'manual' default: UI-created states are manual; approved
+    // lock-time proposals carry 'extraction:<chapter_id>' (Amendment A1).
+    definition: "TEXT DEFAULT 'manual'",
+  });
+}
+
+// Idempotent ALTER TABLE ADD COLUMN. SQLite has no ADD COLUMN IF NOT EXISTS, so
+// we check pragma_table_info first. Re-running is a no-op.
+function addColumnIfMissing(
+  sqlite: Database.Database,
+  args: { table: string; column: string; definition: string },
+): void {
+  const cols = sqlite
+    .prepare(`SELECT name FROM pragma_table_info(?)`)
+    .all(args.table) as Array<{ name: string }>;
+  if (cols.some((c) => c.name === args.column)) return;
+  sqlite.exec(
+    `ALTER TABLE ${args.table} ADD COLUMN ${args.column} ${args.definition}`,
+  );
 }
 
 // The five seed style rules from SPEC.md. Never use em-dashes in any of them.

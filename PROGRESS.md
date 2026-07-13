@@ -285,3 +285,82 @@ text as a new version." All covered by the E2E and unit tests above.
 - D20: A revision saves a new draft version; comments do not carry forward.
 - D21: Revision output is em-dash linted exactly like drafting (reject, retry once,
   then warn, never silently accept).
+
+---
+
+## Phase 5: Lock, extract, sweep (plus Amendment A1)
+
+Status: COMPLETE. All tests green.
+
+### What was built
+
+- Idempotent migration: `character_states` gains a nullable `source` column
+  ('manual' default, 'extraction:<chapter_id>' for approved proposals). Added with a
+  guarded `ALTER TABLE` in `migrate.ts` (`addColumnIfMissing` checks
+  `pragma_table_info` first, so re-running and upgrading a Phase 1-4 DB are both
+  no-ops). `schema.ts` and the characters repo (`addState`, new `findCharacterByName`)
+  updated.
+- Extraction envelope + parsers (`src/lib/llm/extraction.ts`):
+  `parseExtractionResponse` normalizes the A1 envelope `{ facts, states }`
+  defensively (code-fenced and garbage inputs surface raw text); `parseSweepResponse`
+  normalizes a contradiction array.
+- Prompts (`src/lib/llm/prompts.ts`): `summaryPrompt` (~150 words, present tense,
+  canon-relevant), `extractionPrompt` (durable facts + state deltas only, both in one
+  JSON object), `sweepPrompt` (contradictions only as JSON).
+- Approval + unlock repo (`src/lib/repo/extraction.ts`): `approveExtraction` (atomic
+  gate: approved facts become locked canon sourced to the chapter, approved states
+  insert at order_index + 1 with the same source, an unmatched character rejects the
+  whole call), `unlockChapter` (summary cleared, extracted facts dropped to
+  provisional), `extractedFacts`.
+- Sweep aggregation (`src/lib/sweep.ts`): `sweepableChapters` (locked, in range) and
+  `runSweep` (one call per chapter, sequential, per-chapter fixture routing, defensive
+  parse keeps an unparseable chapter's raw text in the report). Every call logged.
+- Routes: `POST /api/chapters/[id]/lock` (summary + status, gated on all comments
+  resolved), `POST /api/chapters/[id]/extract-canon` (proposals, nothing written),
+  `POST /api/extractions/approve` (the gate), `POST /api/chapters/[id]/unlock`,
+  `POST /api/projects/[id]/sweep`. All utility calls log to `llm_calls` with the right
+  purpose and chapterId.
+- UI: `LockPanel` (in the review page via `ReviewEditor`): Lock button enabled only
+  when all comments are resolved; on lock it stores the summary and renders the
+  fact + state approval checklist with per-proposal checkboxes, `a`/`r` keyboard
+  shortcuts, editable state fields, character mapping (select) and inline character
+  creation for unmatched names, an Approve button, and an Unlock action. `SweepRunner`
+  + `/book/[projectId]/sweep` page: locked-chapter range selector, a chapter-count
+  estimate shown before running, a progress indicator while running, and the
+  aggregated report (contradictions with quote + severity, or raw text on parse
+  failure). The book page links to the sweep page; the lock panel links back to it.
+- Fixtures: `summary.phase5.json`, `extraction.phase5.json` (facts + states arrays),
+  `sweep.sweep1.1.json` (a contradiction), `sweep.sweep1.2.json` (clean).
+
+### Test results
+
+- Unit (vitest): 75 passed (was 58; +17: 3 migrate-source, 12 extraction/sweep-parse
+  + approval + unlock, 2 sweep aggregation).
+- E2E (Playwright): 21 passed (was 17; +4): Lock enables only after comments resolve
+  and locking stores a summary and shows proposals; approving a fact makes a locked
+  canon fact at /canon; approving a state shows in the character timeline AND is
+  effective in the next chapter's assembled prompt; sweep over two locked chapters
+  reports a planted contradiction with its quote and severity while the clean chapter
+  reads clean.
+- `tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Phase 5 + Amendment A1)
+
+"locking generates a summary and extraction proposals; approvals become locked facts;
+sweep over two chapters with a planted contradiction reports it" plus A1's "locking a
+chapter whose text shows a character learning something new produces a
+character_state proposal; approving it makes the state visible in that character's
+timeline and effective for the next chapter's assembled prompt." All covered.
+
+### Judgment calls (mirrored in DECISIONS.md)
+
+- D23: Extraction envelope is one JSON object `{ facts, states }`, parsed defensively.
+- D24: Unlock flags stale by clearing the summary and un-locking extracted facts
+  (dropping them to provisional), using existing columns; states left intact.
+- D25: Sweep fixture routing is per-chapter (base key plus 1-based position).
+- D26: Lock and extraction are separate routes driven in sequence by the Lock button;
+  `/unlock` added as the explicit unlock action.
+- D27: The approval gate is atomic; an unmatched character name rejects the whole
+  call; enforced on both client and server; nothing auto-approves.
+- D28: Keyboard parity (a/r) for fact and state proposals now; full keyboard-driven
+  navigation is a Phase 6 importer concern.

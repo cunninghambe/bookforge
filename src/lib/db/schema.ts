@@ -48,6 +48,10 @@ export const characterStates = sqliteTable("character_states", {
   knows: text("knows"),
   feels: text("feels"),
   hiding: text("hiding"),
+  // 'manual' for UI-created states, 'extraction:<chapter_id>' for approved
+  // lock-time proposals (Amendment A1). Added via a guarded ALTER TABLE in
+  // migrate.ts so existing databases upgrade idempotently.
+  source: text("source").default("manual"),
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 });
 

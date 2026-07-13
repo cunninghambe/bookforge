@@ -212,6 +212,80 @@ mapped, preserving the approval gate.
 
 ---
 
+## Phase 5
+
+### D23: Extraction envelope carries both facts and states in one JSON object
+
+Amendment A1 requires the extraction response to carry BOTH new-fact proposals and
+character-state deltas. The envelope (a judgment call) is a single JSON object:
+`{ "facts": [{ type, content, evidence_quote }], "states": [{ character, knows,
+feels, hiding, evidence_quote }] }`. One object (not two calls, not a top-level
+array) keeps a single UTILITY_MODEL call and one defensive parse. `facts` and
+`states` are independently normalized: a fact needs a valid CanonType and non-empty
+content; a state needs a non-empty character name and at least one non-empty delta
+field (deltas only, never a restatement). Invalid entries are dropped; a wholly
+unparseable response surfaces its raw text (`parseExtractionResponse` in
+`src/lib/llm/extraction.ts`), never silently dropped.
+
+### D24: Unlock represents "stale" by clearing the summary and un-locking extracted facts
+
+SPEC 6.d: unlocking flags the summary and extracted facts as stale for
+regeneration; the representation is a judgment call, simplest compliant. Chosen
+(`unlockChapter` in `src/lib/repo/extraction.ts`): status returns to `review`, the
+summary is set to NULL (a re-lock regenerates it), and every canon_fact with source
+`extraction:<chapterId>` that is still `locked` drops to `provisional`, which
+removes it from prompt assembly (`assemblableCanon` returns only locked) until it is
+re-approved through the gate. This uses existing columns (no schema churn), is
+directly testable, and only ever removes facts from canon rather than adding any, so
+it cannot soften the approval gate. Extracted state rows are left intact: they are
+already-applied deltas, and a re-lock re-proposes any further deltas. Seed and
+non-extraction locked facts are untouched (matched by exact source string).
+
+### D25: Sweep fixture routing is per-chapter, base key plus 1-based position
+
+The consistency sweep makes one call per chapter. For E2E a single run needs
+distinct responses per chapter (one reporting a planted contradiction, one clean).
+`runSweep` derives each chapter's fixtureKey as `${baseKey}.${position}` where
+position is the 1-based index within the swept (locked, in-range) set, sorted by
+order_index. So `?fx=sweep1` routes chapter 1 to `sweep.sweep1.1.json` and chapter 2
+to `sweep.sweep1.2.json`. The real Anthropic client ignores fixtureKey, so the
+passthrough is harmless in production (same pattern as the draft/revise routes).
+
+### D26: Lock and extraction are separate calls, driven in sequence by the Lock button
+
+The API surface lists `/lock`, `/extract-canon`, and `/extractions/approve`
+separately. The review-page Lock button (in `LockPanel`) calls `/lock` (generate and
+store the summary, set status locked) and then `/extract-canon` (propose facts +
+states) in sequence, then renders the approval checklist. Keeping them as distinct
+routes matches the surface and lets the importer (Phase 6) reuse extraction without
+re-locking. `/unlock` is added as the explicit unlock action SPEC 6.d requires
+(implementing described behavior, not a new feature).
+
+### D27: Approval gate is atomic; unmatched character names reject the whole call
+
+`approveExtraction` resolves every approved state to an existing character first (an
+explicit characterId that exists wins, else an exact case-insensitive name match).
+If any approved state is unmatched, the entire call is rejected and nothing is
+created, not even valid facts, so the author maps or inline-creates the character and
+re-submits. Approved facts become `locked` canon sourced `extraction:<chapterId>`;
+approved states insert at `chapter_order = locked order_index + 1` with the same
+source (Amendment A1 / D22). Both the client (`LockPanel`) and the server
+(`/api/extractions/approve` + the repo) enforce the mapping, so the gate holds even
+if the UI is bypassed. Nothing auto-approves and there is no bulk-approve-all
+default: each proposal is an explicit checkbox.
+
+### D28: Extraction approval checklist keyboard parity now, full nav deferred to Phase 6
+
+Amendment A1 says state proposals render "in the same approval checklist as fact
+proposals, with the same keyboard shortcuts". Both fact and state rows are focusable
+and share the same shortcuts (`a` approve, `r` reject on the focused row), giving the
+parity A1 requires. The richer keyboard-driven flow the SPEC describes for the Phase
+6 backfill importer (arrow navigation between rows, batch approval) is built and
+tested there, where it is an explicit acceptance requirement; Phase 5 keeps the
+checkbox checklist as the primary mechanism.
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc
