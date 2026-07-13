@@ -315,3 +315,29 @@ This tool exists to make Books 2 and 3 as good as Book 1 with less manual overhe
 Character states must stay dense automatically as the book progresses. Extend the Phase 5 lock/extraction flow (and the Phase 6 importer, which reuses it): in addition to canon fact proposals, UTILITY_MODEL proposes character_state updates from the locked chapter's final text, as JSON: [{character, knows, feels, hiding, evidence_quote}]. Proposals are deltas only (new knowledge, shifted feelings, secrets gained or revealed), not restatements of existing state. They render in the same approval checklist as fact proposals, with the same keyboard shortcuts. Approved proposals insert character_states rows effective from the chapter after the locked one (chapter_order = locked chapter order_index + 1), editable before approval. Proposals naming a character that does not match an existing characters row cannot be approved until mapped to one (or the character is created inline). Add a nullable source column to character_states ('manual' default, 'extraction:<chapter_id>') via an idempotent migration. The approval gate is not softened: no state row is created without explicit approval.
 
 Phase 5 acceptance check addition: locking a chapter whose text shows a character learning something new produces a character_state proposal; approving it makes the state visible in that character's timeline and effective for the next chapter's assembled prompt.
+
+### A2 (2026-07-13): UI chapter numbering convention and sweep error surfacing
+
+Found during a hands-on test drive. Two fixes, no new features.
+
+A2.1 Chapter numbering: the database stays 0-based (chapters.order_index and character_states.chapter_order share that scale; a state applies to chapters with order_index >= chapter_order). The UI speaks 1-based chapter numbers EVERYWHERE, converting at the boundary. Concretely: the character add-state form accepts "effective from chapter N" where N is the 1-based number shown in the sequencer, and stores chapter_order = N - 1; state timelines display chapter_order + 1; the importer's order field accepts a 1-based position (1 = first) and stores position - 1; any other surface that shows or accepts a chapter number uses the 1-based form. No data migration for existing rows: the semantic is a display/input convention, and there is no production data yet. Regression check, mandatory: entering a state "effective from chapter 1" through the UI for a book's first chapter must make that state appear in that chapter's assembled prompt (verifiable via the dev prompt route). A unit-tested pair of conversion helpers (uiChapterToOrder / orderToUiChapter) must be the single place the conversion happens.
+
+A2.2 Sweep errors carry reasons: a per-chapter LLM or parse failure appears in the sweep report as an entry naming the chapter and the error message (parse failures keep surfacing the raw text). A failure of the whole run shows the underlying message in the UI, never a bare "Sweep failed."
+
+### A3 (2026-07-13): Series bible importer
+
+Purpose: starting Book 2 requires Book 1's chapters (the existing backfill importer) plus the author's story bible: the accumulated world rules, character sheets, timeline notes, and standing decisions that never lived in any chapter. This importer turns a pasted bible into structured, approval-gated data.
+
+Page: /import-bible, linked from the home Books page. A large paste textarea, a scope selector (series-wide, or a specific book), and the same calm approval-checklist UX as the backfill importer, with identical keyboard shortcuts (a approve, r reject, arrows to move).
+
+Route: POST /api/bible/import. UTILITY_MODEL (new purpose "bible") reads the pasted text plus the current canon list and tracked character names (to avoid duplicate proposals) and returns JSON:
+{ "facts": [{ "type": "world_rule | style_rule | timeline_event | character_fact | plot_decision", "content": "..." }], "characters": [{ "name": "...", "role": "...", "voice_rules": "...", "physical": "...", "notes": "..." }], "states": [{ "character": "...", "knows": "...", "feels": "...", "hiding": "..." }] }
+Long bibles are processed in sequential chunks (split on paragraph boundaries at roughly 24,000 characters per call) with a progress indicator like the sweep's; proposals from all chunks merge into one checklist. Parse failures surface the raw text.
+
+Approval semantics, same gate discipline as everything else (nothing lands unapproved, no approve-all default):
+- Approved facts become canon_facts with the chosen scope, status locked, source 'bible'.
+- Approved characters are created as characters rows. A proposed character whose name matches an existing one (case-insensitive) is shown as an update proposal against that row rather than a duplicate.
+- Approved states require a book scope (disabled for series-wide) and land at chapter_order 0 with source 'bible', i.e. effective from that book's first chapter onward. A state naming a character not yet tracked can be approved together with that character's own creation proposal in the same batch; the character is created first.
+- Every LLM call logs to llm_calls with purpose 'bible'.
+
+Acceptance check: paste a bible containing at least two world rules, a style note, two characters (one with voice rules), and one character state; the proposals come back categorized; keyboard-only approval of a subset creates exactly the approved items (locked facts with source 'bible', character rows, a state at chapter_order 0 visible in the timeline); a chapter of the chosen book then shows the approved facts and state in its assembled prompt; rejected proposals leave no trace.
