@@ -5,12 +5,13 @@ import {
   passwordMatches,
   sessionCookieOptions,
 } from "@/lib/auth";
+import { isAuthConfigured } from "@/lib/authConfig";
 
 export async function POST(req: Request) {
   const secret = process.env.SESSION_SECRET ?? "";
   const expected = process.env.APP_PASSWORD ?? "";
 
-  if (secret.length === 0 || expected.length === 0) {
+  if (!isAuthConfigured({ APP_PASSWORD: expected, SESSION_SECRET: secret })) {
     return NextResponse.json(
       { error: "server not configured: APP_PASSWORD and SESSION_SECRET required" },
       { status: 500 },

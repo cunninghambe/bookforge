@@ -45,9 +45,15 @@ test.describe("Phase 2: sequencer", () => {
     await addChapter(page, t1);
     await addChapter(page, t2);
 
-    // t1 was added first so it sits above t2. Move t1 down.
+    // t1 was added first so it sits above t2. Move t1 down, and wait for the
+    // reorder POST to complete so the reload cannot race the persistence.
     const row1 = page.getByTestId("chapter-row").filter({ hasText: t1 });
-    await row1.getByTestId("move-down").click();
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes("/api/chapters/reorder") && r.ok(),
+      ),
+      row1.getByTestId("move-down").click(),
+    ]);
 
     await page.reload();
     const titles = await page.getByTestId("chapter-title").allInnerTexts();

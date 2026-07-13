@@ -361,6 +361,61 @@ insert (D30's `createChapterAtOrder`).
 
 ---
 
+---
+
+## Phase 7
+
+### D34: Docker build and Fly deploy were not executed
+
+No Docker daemon is available in this environment. The Dockerfile and
+`fly.toml` are a best-correct-effort, checked by inspecting the traced
+`.next/standalone` output (see D35) rather than an actual `docker build` /
+`flyctl deploy`. This is stated plainly rather than claimed as verified; the
+user should run `docker build -t bookforge .` locally before a real deploy.
+
+### D35: better-sqlite3's native binary confirmed present in the standalone trace
+
+`next build` with `output: "standalone"` was run locally and
+`.next/standalone/node_modules/better-sqlite3/build/Release/better_sqlite3.node`
+was confirmed to exist, along with the package's JS wrapper and its own small
+dependency set (`bindings`, `file-uri-to-path`, `detect-libc`). This confirms
+`serverExternalPackages: ["better-sqlite3"]` (kept out of the JS bundle) still
+gets traced into the standalone `node_modules` subset correctly. The caveat
+recorded in the Dockerfile and DEPLOY.md: this only works when the binary is
+compiled inside a Linux build stage; a host-built (Windows) `node_modules`
+cannot be traced into a Linux runtime image, which is why the Dockerfile's
+`deps` and `builder` stages both run `node:20-bookworm-slim`, not the host.
+
+### D36: Backup directory is beside the database file, not a fixed cwd-relative path
+
+SPEC's example (`backups/bookforge-YYYYMMDD-HHmmss.db`) does not fix whether
+`backups/` is relative to the database file or the process's working
+directory. Chosen: `dirname(dbPath)/backups`, so a production
+`DATABASE_PATH=/data/bookforge.db` produces backups at `/data/backups/`, on
+the same Fly volume mount, surviving restarts. A `./backups` relative to
+`process.cwd()` would land on the container's ephemeral filesystem in
+production, defeating the point of a backup.
+
+### D37: fly.toml pins a single always-on machine
+
+`min_machines_running = 1` and `auto_stop_machines = false`. SQLite on one
+mounted volume is not safe for concurrent access from more than one machine;
+Fly's default scale-to-zero / multi-machine behavior could start a second
+machine against the same volume. This is a deliberate constraint of running
+SQLite on Fly, not an oversight or missing feature.
+
+### D38: The production auth gate blocks every path, not just protected ones
+
+`mustBlockForMissingAuthConfig` in `src/middleware.ts` runs before the
+public-path check, so `/login` and `/api/auth/login` also 503 in production
+when `APP_PASSWORD`/`SESSION_SECRET` are unset, rather than rendering a login
+form that will only fail at submit time. Chosen as the simplest compliant
+reading of "the app must refuse to serve protected content": the
+misconfiguration surfaces immediately (a Fly health check against `/login`
+fails) instead of as a working-looking login page with a broken submit.
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

@@ -458,3 +458,137 @@ not something a test asserts.
   server-side to `[0, existingChapterCount]`; the client's default value is a
   local running count, but the server is the source of truth for the clamp and
   the shift.
+
+---
+
+## Phase 7: Hardening and deploy prep
+
+Status: COMPLETE. All tests green.
+
+### What was built
+
+- DB path: `resolveDbPath` (`src/lib/db/raw.ts`) already honored `DATABASE_PATH`
+  for both relative and absolute paths, resolved against `process.cwd()`
+  (`path.resolve` passes an absolute input through unchanged), and `openRawDb`
+  already auto-created the parent directory. No behavior change was needed;
+  `tests/unit/db-path.test.ts` (7 tests) adds direct coverage: default path,
+  relative override, absolute override, directory auto-creation for both
+  relative and absolute paths, idempotent re-open, and the env-driven default
+  when no explicit path is passed.
+- Backup: `scripts/backup-core.mjs` (plain Node ESM, no TS, no deps beyond
+  `node:fs`/`node:path`) exports `formatTimestamp` and `backupDbFile`, unit
+  tested directly (`tests/unit/backup.test.ts`, 6 tests: missing-file refusal,
+  directory creation, timestamp-suffixed filename, WAL/SHM sidecar copy when
+  present, partial-sidecar case, idempotent re-run into an existing backup
+  dir). `scripts/backup.mjs` is the thin CLI wrapper `npm run backup` already
+  pointed at: resolves `DATABASE_PATH` (duplicating `resolveDbPath`'s two
+  lines, since a plain-Node script cannot import TypeScript), computes a
+  `backups/` directory beside the database file, calls `backupDbFile`, and
+  prints the created path (and any copied sidecars) or a clear failure message
+  with a non-zero exit code.
+- Auth in production: `src/lib/authConfig.ts` adds two pure functions,
+  `isAuthConfigured` and `mustBlockForMissingAuthConfig`, unit tested directly
+  (`tests/unit/authConfig.test.ts`, 10 tests). `src/middleware.ts` now checks
+  `mustBlockForMissingAuthConfig(process.env.NODE_ENV, process.env)` before
+  anything else (after letting `_next`/favicon assets through) and returns a
+  plain 503 ("APP_PASSWORD not configured") for every path, JSON for `/api/*`,
+  when running in production without both `APP_PASSWORD` and `SESSION_SECRET`
+  set. Dev and test are unaffected: the existing auth tests, the login route's
+  own 500 when unconfigured, and the E2E suite (which runs `next dev`, so
+  `NODE_ENV` is never `production`) all keep their prior behavior.
+  `src/app/api/auth/login/route.ts` now calls `isAuthConfigured` instead of
+  duplicating the two-length check, no behavior change.
+- Dockerfile: three-stage build (`deps`, `builder`, `runner`), all on
+  `node:20-bookworm-slim` (not alpine, to avoid a musl/prebuild mismatch for
+  better-sqlite3 and sharp). `deps` installs `python3 make g++` as the
+  node-gyp fallback for `better-sqlite3`'s `prebuild-install` and runs
+  `npm ci`. `builder` runs `npm run build` (Next standalone output). `runner`
+  copies only `.next/standalone` (which already includes a traced
+  `node_modules` subset, confirmed to contain the compiled
+  `better_sqlite3.node` binary, see Judgment calls) plus `.next/static` and the
+  backup script, runs as a non-root user, and defaults `DATABASE_PATH` to
+  `/data/bookforge.db`. `next.config.ts` gained `output: "standalone"`.
+  `.dockerignore` added.
+- `fly.toml`: app config with `[mounts]` mapping a `bookforge_data` volume to
+  `/data`, `DATABASE_PATH=/data/bookforge.db` in `[env]`, `internal_port = 3000`
+  matching the Dockerfile's `EXPOSE`, and `min_machines_running = 1` with
+  `auto_stop_machines = false` (see Judgment calls). A comment block at the top
+  lists the one-time `flyctl` setup commands (app create, volume create,
+  secrets set for `ANTHROPIC_API_KEY`, `APP_PASSWORD`, `SESSION_SECRET`); none
+  were run.
+- `DEPLOY.md`: local run from a fresh clone, backup usage, Docker build/run,
+  Fly.io one-time setup and deploy, and how to run a backup against the
+  production volume over `flyctl ssh console`.
+
+### Test results
+
+- Unit (vitest): 107 passed (was 84; +23: 7 db-path, 6 backup, 10 authConfig).
+- E2E (Playwright): 24 passed, unchanged from Phase 6 (no new E2E required for
+  this phase; deploy artifacts are not browser-testable). Re-ran the full
+  suite after the production build and after deleting `.next`, against a fresh
+  `npm run dev` (`NODE_ENV` is not `production` there, so the new middleware
+  gate never engages in dev/E2E).
+- `tsc --noEmit`: clean.
+- `npm run build`: succeeds cleanly with `output: "standalone"` set; no
+  Suspense-boundary or dynamic-rendering fixes were needed, the existing route
+  tree built cleanly the first time.
+- Backup script exercised end to end against a real file: created a scratch DB
+  at `./data/scratch-backup-test.db`, ran `DATABASE_PATH=./data/scratch-backup-test.db
+  node scripts/backup.mjs`, confirmed the timestamped copy under
+  `./data/backups/` byte-identical to the source, confirmed the missing-file
+  path fails cleanly with a non-zero exit code, then deleted every scratch
+  file and the now-empty `backups/` directory.
+
+### Acceptance check (SPEC Phase 7)
+
+"DB file path configurable, Dockerfile + Fly.io config with a mounted volume,
+APP_PASSWORD required in production mode, basic backup script (copy the SQLite
+file with a timestamp)." All four covered: `DATABASE_PATH` (pre-existing,
+now directly tested), `Dockerfile` + `fly.toml` with `[mounts]`, the
+production-mode 503 gate in `src/middleware.ts`, and `scripts/backup.mjs`.
+
+### Judgment calls (mirrored in DECISIONS.md)
+
+- D34: Docker build and Fly deploy were not executed (no Docker daemon in this
+  environment); the Dockerfile and fly.toml are a best-correct-effort, verified
+  by inspecting the traced standalone output rather than an actual image
+  build. Stated plainly, not claimed as tested.
+- D35: The standalone trace was confirmed by inspection to include the
+  compiled `better_sqlite3.node` binary under
+  `.next/standalone/node_modules/better-sqlite3/build/Release/`, plus its JS
+  wrapper and its own runtime deps (`bindings`, `file-uri-to-path`,
+  `detect-libc`). This only works because the binary is built inside a Linux
+  build stage; it cannot be traced from a host-built (Windows) `node_modules`.
+- D36: Backup directory defaults to a `backups/` directory beside the database
+  file (`dirname(dbPath)/backups`), not a fixed `./backups` relative to the
+  process cwd. On Fly, `DATABASE_PATH=/data/bookforge.db` puts backups at
+  `/data/backups/`, on the same mounted volume, so they survive restarts; a
+  cwd-relative default would put them on the ephemeral container filesystem.
+- D37: `fly.toml` pins `min_machines_running = 1` and
+  `auto_stop_machines = false`. SQLite on a single mounted volume is not safe
+  to access from more than one machine at once; scale-to-zero or multi-machine
+  auto-scaling would risk two machines opening the same file. This is a
+  deliberate single-instance constraint, not an oversight.
+- D38: The production auth gate blocks every path, including `/login` and
+  `/api/auth/login`, with a 503, rather than letting the login page load and
+  only failing at submit time. Simplest compliant reading of "refuse to serve
+  protected content": the operator misconfiguration is visible immediately
+  (health check fails) instead of surfacing as a broken login form.
+
+---
+
+## Final verification (orchestrator, after Phase 7 review)
+
+- Independent re-runs after every phase merge: 107 unit tests, 24 Playwright
+  tests, tsc clean, production build (standalone) clean.
+- One flake found during the Phase 7 cold-server E2E run: the Phase 2 "reorder
+  persists across reload" test could reload before the reorder POST resolved.
+  Fixed by awaiting the /api/chapters/reorder response before reloading. This
+  strengthens determinism; no assertion was weakened. Full suite re-run cold:
+  24/24 pass.
+- Phases 4 and 5 were built by Opus subagents, Phases 6 and 7 by Sonnet
+  subagents, each reviewed (diff, assertion audit, independent test runs,
+  em-dash scan) and approved by the orchestrator before commit.
+- Not verified in this environment: the Docker image build (no Docker daemon)
+  and any behavior against the real Anthropic API (all tests use fixtures by
+  design). Both are called out in DEPLOY.md and the Phase 7 report.

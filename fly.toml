@@ -1,0 +1,49 @@
+# Fly.io app configuration. Deploy from the Dockerfile at the repo root.
+#
+# One-time setup (run these yourself; nothing here is executed automatically):
+#
+#   flyctl launch --no-deploy --copy-config --name <your-app-name>
+#     (or `flyctl apps create <your-app-name>` if you already have this file)
+#   flyctl volumes create bookforge_data --size 1 --region <your-region>
+#   flyctl secrets set \
+#     ANTHROPIC_API_KEY=<key> \
+#     APP_PASSWORD=<password> \
+#     SESSION_SECRET=<openssl rand -hex 32>
+#   flyctl deploy
+#
+# Replace "bookforge" below with your actual app name from `flyctl launch` /
+# `flyctl apps create` if it differs. The volume name (bookforge_data) must
+# match the source in [mounts] below.
+
+app = "bookforge"
+primary_region = "iad"
+
+[build]
+
+[env]
+  DATABASE_PATH = "/data/bookforge.db"
+  DRAFT_MODEL = "claude-sonnet-4-6"
+  UTILITY_MODEL = "claude-sonnet-4-6"
+
+[mounts]
+  source = "bookforge_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/login"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

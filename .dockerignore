@@ -1,0 +1,13 @@
+node_modules
+.next
+data
+backups
+test-results
+tests
+tsconfig.tsbuildinfo
+.env.local
+.env*.local
+npm-debug.log*
+.git
+.gitignore
+*.md
