@@ -121,6 +121,26 @@ before locking. The rule is enforced, not softened.
 
 ---
 
+## Spec amendments accepted mid-build
+
+### D15: Amendment A1, character-state extraction at lock time (2026-07-13)
+
+Proposed during the Phase 3 stop while discussing character chatbots: the chatbot
+idea stays deferred, but its prerequisite (dense, automatically maintained
+character states) was accepted by the author as amendment A1 in SPEC.md. Lock-time
+extraction (Phase 5) and the importer (Phase 6) will propose character_state
+deltas alongside canon facts, through the same approval checklist. Approved states
+land with chapter_order = locked chapter order_index + 1, so the assembler picks
+them up from the next chapter onward. Rationale for N+1 rather than N: state rows
+effective at N would alter the assembled context of the very chapter that produced
+them; the chapter itself already contains the events, so the state should start
+applying when drafting resumes after it. character_states gains a nullable source
+column ('manual' default, 'extraction:<chapter_id>') via an idempotent ALTER TABLE
+guarded by pragma_table_info. Unmatched character names cannot be approved until
+mapped, preserving the approval gate.
+
+---
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc
@@ -145,7 +165,9 @@ in-character about what it is hiding at N, refuses post-N knowledge, and emits a
 missing-fact line instead of inventing. Primary use: voice audition ("what would
 you say in this situation") before drafting. Guardrail: chat is ephemeral; nothing
 enters canon except through an explicit propose-as-provisional-fact button that
-uses the normal approval gate. Runs on UTILITY_MODEL, logged to llm_calls.
+uses the normal approval gate. Runs on UTILITY_MODEL, logged to llm_calls. Its
+prerequisite (dense character states) was accepted separately as amendment A1; see
+D15.
 
 ### MCP server exposing BookForge
 

@@ -307,3 +307,11 @@ Check: DB file path configurable, Dockerfile + Fly.io config with a mounted volu
 ## Quality bar
 
 This tool exists to make Books 2 and 3 as good as Book 1 with less manual overhead, not to make them faster and worse. Where a tradeoff appears between generation convenience and review rigor, choose rigor. The diff enforcement in Phase 4 and the approval gate in Phase 5 are the two features that must never be softened to "make the flow smoother".
+
+## Amendments (authorized by the author after the spec was written)
+
+### A1 (2026-07-13): Character-state extraction at lock time
+
+Character states must stay dense automatically as the book progresses. Extend the Phase 5 lock/extraction flow (and the Phase 6 importer, which reuses it): in addition to canon fact proposals, UTILITY_MODEL proposes character_state updates from the locked chapter's final text, as JSON: [{character, knows, feels, hiding, evidence_quote}]. Proposals are deltas only (new knowledge, shifted feelings, secrets gained or revealed), not restatements of existing state. They render in the same approval checklist as fact proposals, with the same keyboard shortcuts. Approved proposals insert character_states rows effective from the chapter after the locked one (chapter_order = locked chapter order_index + 1), editable before approval. Proposals naming a character that does not match an existing characters row cannot be approved until mapped to one (or the character is created inline). Add a nullable source column to character_states ('manual' default, 'extraction:<chapter_id>') via an idempotent migration. The approval gate is not softened: no state row is created without explicit approval.
+
+Phase 5 acceptance check addition: locking a chapter whose text shows a character learning something new produces a character_state proposal; approving it makes the state visible in that character's timeline and effective for the next chapter's assembled prompt.
