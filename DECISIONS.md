@@ -676,6 +676,9 @@ linear draft versions.
 
 ## Deferred feature ideas (author-proposed mid-build, not in SPEC v1)
 
+Update 2026-07-13: both ideas below were accepted into scope as amendments A5
+(character chatbots) and A6 (MCP server) in SPEC.md and are being built.
+
 Recorded 2026-07-13 during the Phase 3 stop. Not built in this run per the SPEC
 rule against unspecced features; candidates for a v1.1 spec amendment after
 Phase 7.

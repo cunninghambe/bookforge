@@ -341,3 +341,66 @@ Approval semantics, same gate discipline as everything else (nothing lands unapp
 - Every LLM call logs to llm_calls with purpose 'bible'.
 
 Acceptance check: paste a bible containing at least two world rules, a style note, two characters (one with voice rules), and one character state; the proposals come back categorized; keyboard-only approval of a subset creates exactly the approved items (locked facts with source 'bible', character rows, a state at chapter_order 0 visible in the timeline); a chapter of the chosen book then shows the approved facts and state in its assembled prompt; rejected proposals leave no trace.
+
+### A4 (2026-07-13): Token efficiency, without losing quality
+
+Two changes. The revision INPUT always remains the full chapter: that is where quality lives and it is the cheap, cacheable side. Never trim it.
+
+A4.1 Prompt caching. The Anthropic client wrapper gains support for a cacheable prompt prefix: an optional promptPrefix on the call options; when present, the real client sends the system text and the prefix as content blocks marked with cache_control (ephemeral), with the variable remainder as an uncached block. The block-construction logic lives in a pure, unit-tested function; the fixture client ignores caching but accepts the same options. Callers that must use it: (1) drafting, where the assembler's stable blocks (system plus CANON, CHARACTERS, STORY SO FAR, PREVIOUS CHAPTER) form the prefix and CURRENT CHAPTER plus TASK form the remainder, so Continue/Redraft bursts within a session hit the cache; (2) the sweep, restructured so the shared locked-canon block is the prefix and the per-chapter text is the remainder; (3) revision, where the system prompt and the chapter text form the prefix (the em-dash retry then hits the cache). llm_calls gains nullable cache_read_tokens and cache_write_tokens columns (idempotent guarded ALTER TABLE, same pattern as character_states.source) populated from the API usage fields, so cost drift and cache savings are visible.
+
+A4.2 Patch-mode revision. The default revision contract changes from "return the complete revised chapter" to returning ONLY the changes, as JSON:
+{ "patches": [{ "original": "verbatim text from the chapter, extended to complete sentences", "replacement": "..." }], "consistency_fixes": [{ "original": "...", "replacement": "...", "justification": "one line" }] }
+The prompt instructs: patches address the flagged comments; each original must be copied verbatim from the chapter and extended to cover whole sentences including any wording needed to keep the seams smooth; consistency_fixes are the out-of-span changes the old contract declared under [CONSISTENCY FIXES], now as patches with a justification.
+
+Mechanical application, reusing the existing enforcement path unchanged: the server anchors each original in the current text (findSpan semantics: unique or first occurrence), applies all patches to produce the revised full text, then runs the SAME analyzeRevision diff classification and the SAME per-hunk accept/reject resolve flow as Phase 4. Declared entries are the consistency_fixes justifications. A patch whose original cannot be found verbatim is surfaced in the UI as a failed patch with its text shown; the remaining patches still apply. The em-dash lint applies to replacements (reject and retry once, then warn).
+
+Fallback to the old full-text mode: automatically when the flagged spans cover more than 40 percent of the chapter's characters, and when the patch JSON fails to parse after one patch-mode retry (the fallback call is flagged in the UI as a full revision). Patch-mode calls may be non-streaming; the UI shows an in-progress state instead of streamed prose.
+
+Acceptance check: the Phase 4 acceptance scenario re-run in patch mode passes identically (in-span fix applied, declared consistency fix passes, an undeclared out-of-span patch lands in the unauthorized panel, per-hunk accept and reject produce exact final texts); a mid-paragraph patch reads cleanly across both seams (no doubled spaces, no dropped punctuation, asserted mechanically); the output tokens recorded in llm_calls for a small edit set are a small fraction of the chapter's size rather than proportional to it; the drafting and sweep call paths construct a cacheable prefix (unit-asserted on the block-construction function).
+
+### A5 (2026-07-13): Character chatbots
+
+Purpose: talk to a character in their own voice, pinned to a moment in the story, to audition dialogue ("what would you say in this situation"), test whether a beat is in-voice, and keep the author's ear tuned between drafting sessions. This is the deferred idea from DECISIONS.md, now in scope; its prerequisite (dense character states, A1) is built.
+
+Page: /characters/[id]/chat, reachable from a "Chat" action on each character card. Calm, text-forward chat surface consistent with the rest of the app.
+
+Pinning "when": no chat until the moment is pinned. The opening of the session is the bot asking, in effect, "when in the book am I?"; the user answers by picking a book and a 1-based chapter number (A2 convention). The pin is visible for the whole session and can be changed; changing it starts a fresh conversation (state boundaries differ, so history from another moment would leak).
+
+Context assembly for the chat system prompt, all server-side:
+- The character card: name, role, voice_rules, physical, notes.
+- The character's effective state as of the pinned chapter (existing effectiveState semantics).
+- Locked character_fact canon mentioning the character, series-wide plus the pinned book.
+- The stored summaries of locked chapters of the pinned book up to and including the pinned chapter, in order (the knowledge horizon).
+- Knowledge hygiene rules, mandatory in the prompt: the character knows ONLY what the context establishes as of the pin; they deflect in-character about what their state says they are hiding; they refuse, in-character, to speak of events after the pin; when asked something canon does not establish, they do not invent it: they answer in-character that they do not know, and append a line after the marker [MISSING FACT]: naming what was missing, which the UI surfaces as a subtle note (same convention as drafting).
+- Voice discipline: stay in the character's voice per voice_rules; dialogue subtext rules from locked style_rule facts apply; never use em-dashes.
+
+Mechanics:
+- UTILITY_MODEL, streaming replies. Purpose "chat" in llm_calls (chapter_id null).
+- Multi-turn is serialized into a single prompt: the character context is the cacheable prefix (A4.1 promptPrefix), the running transcript plus the new user message is the variable remainder, so every turn after the first hits the cache.
+- Em-dash lint on replies: reject and regenerate once, then surface the existing unresolved warning style.
+- Chat history is ephemeral: client-side only, never persisted to the database. Nothing from a chat enters canon except through the explicit gate: each bot reply carries a "propose as canon fact" action that creates a PROVISIONAL canon_fact (type selectable, default character_fact, scope defaulting to the pinned book, source 'chat:<character_id>') which must be locked through the normal canon flow. No auto-locking from chat.
+
+Acceptance check: with a character that has voice_rules and two states (effective from chapters 1 and 4 in UI terms), pinning the chat at chapter 3 assembles a context containing the chapter-1 state and NOT the chapter-4 state, and only summaries of locked chapters up to 3; a fixture-driven reply streams into the chat; asking about a post-pin event yields an in-character refusal (fixture); a reply's "propose as canon fact" creates a provisional fact with source 'chat:<id>' visible at /canon; the database contains no chat transcript afterward.
+
+### A6 (2026-07-13): MCP server
+
+Purpose: expose BookForge to MCP clients (Claude Code, Claude Desktop) so an agent can manage canon, characters, chapters, drafting, and chat programmatically. Local, single-user tool: the MCP server is a local stdio process operating directly on the SQLite database through the same repo layer the routes use; it does not pass the password gate, which is a documented, deliberate decision (same trust boundary as the DB file itself).
+
+Implementation: a script (npm run mcp) using @modelcontextprotocol/sdk (new dependency, latest version) over stdio. It reads the same env (.env.local semantics documented) for DATABASE_PATH and the model vars, honors USE_FIXTURE_LLM for tests, and reuses src/lib repo and llm modules directly. Include an example client registration snippet (.mcp.json) in DEPLOY.md.
+
+Tools (names indicative; all read tools return compact JSON; every chapter number in tool inputs and outputs is 1-based per A2, stated in each tool description):
+- canon_list (filters), canon_add (defaults provisional; status must be explicitly provisional or locked), canon_lock, canon_retire
+- characters_list, character_get (card plus state timeline), character_add_state (1-based effective-from chapter)
+- chapters_list, chapter_get (includes synopsis, beats, status, latest draft text), chapter_create, chapter_update (title, pov, synopsis, beats)
+- interrogate_chapter (returns the stored questions), answer_question (creates the provisional plot_decision like the route)
+- draft_scene (chapter plus 1-based beat numbers; returns the clean prose, missing facts, canon tensions; non-streaming)
+- assembled_prompt (the dev inspection dump for a chapter)
+- character_chat (single turn: character, pinned book and 1-based chapter, prior transcript, message; returns the reply and any missing-fact notes; A5 semantics)
+- export_book (returns the Markdown)
+- sweep_book (chapter range; returns the report; the description warns it costs tokens per chapter)
+
+Hard boundary, from the SPEC quality bar and recorded in the tool set itself: NO MCP tool may approve extraction or bible proposals, resolve revision hunks, lock chapters, or import chapters. Those approval gates are human-only and stay in the UI. The server must not even register tools for them, so a confused agent cannot be talked into it.
+
+Every LLM-calling tool logs to llm_calls with its normal purpose. Errors return MCP tool errors with the underlying message, never silent failures.
+
+Acceptance check: an automated test drives the server over stdio (spawn the process with USE_FIXTURE_LLM=1 and a scratch DATABASE_PATH, speak MCP over the SDK client): lists tools and confirms the human-only actions are absent; canon_add then canon_lock round-trips and the fact appears in canon_list as locked; character_add_state with a 1-based chapter lands at the correct internal order; draft_scene returns the fixture prose with markers extracted; character_chat returns the fixture reply; export_book returns Markdown containing a locked chapter's heading; sweep_book over a range returns the fixture report; an LLM-calling tool logs to llm_calls.
