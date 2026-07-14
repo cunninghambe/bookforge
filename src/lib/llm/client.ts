@@ -12,7 +12,8 @@ export type LlmPurpose =
   | "extraction"
   | "sweep"
   | "draft"
-  | "revision";
+  | "revision"
+  | "bible";
 
 export interface CompleteOptions {
   purpose: LlmPurpose;

@@ -482,6 +482,89 @@ weakened.
 
 ---
 
+## Amendment A3 (2026-07-13): Series bible importer
+
+### D44: The bible is chunked server-side in one POST, mirroring the sweep
+
+SPEC A3 asks for long bibles to be processed as "sequential calls with a progress
+indicator like the sweep's". The sweep (`runSweep`) does its sequential per-chapter
+calls inside a single POST and the client shows a generic progress indicator; A3
+follows the same shape. `runBibleImport` (`src/lib/bibleImport.ts`) splits the text
+with `chunkBible`, runs one UTILITY_MODEL call per chunk in sequence (purpose
+"bible", each logged to `llm_calls`), parses each defensively, and merges the
+proposals from every chunk into one set returned by `POST /api/bible/import`. The
+`BibleImportPanel` computes the chunk count for the progress copy the same way
+`SweepRunner` computes its estimate. A single client-POST-per-chunk design was the
+alternative; the single-POST server-side loop is the simpler match to the existing
+sweep and keeps fixture routing straightforward. Per-chunk fixture routing (D25's
+pattern): a single chunk uses the base key (`bible.<key>.json`), multiple chunks
+suffix the 1-based position (`bible.<key>.<n>.json`); the real client ignores it.
+
+### D45: `BibleImportPanel` is its own component, not a reuse of `ImportPanel`
+
+Consistent with D32 (which chose a separate `ImportPanel` over reusing `LockPanel`),
+the bible checklist is its own component. It has a genuinely different category set:
+three sections (facts, characters, states) versus the importer's two, a scope
+selector that hides the states section for a series-wide import, and a characters
+section that renders create-vs-update proposals (with the fields that would change)
+rather than the importer's evidence-quoted facts. Both components share the same
+keyboard model (arrows move focus across all rows in order, a/r approve/reject the
+focused row) and both submit only explicitly approved proposals to a server-side
+approval gate. Extracting a shared low-level row component was weighed and rejected:
+it would have meant editing the tested `ImportPanel` for marginal deduplication of
+markup, against the same reasoning D32 recorded. The approval mechanism is one
+implementation (`approveBible`); only the checklist markup around it differs.
+
+### D46: The extraction prompt sees all locked canon and all tracked names, whatever the scope
+
+To avoid duplicate proposals the bible prompt includes the current canon and the
+tracked character names. `runBibleImport` passes all currently-locked canon facts
+(`listCanon(db, { status: "locked" })`) and every tracked character name, regardless
+of the chosen scope. Scope (series-wide or a book) determines only where approved
+data lands, not what context the model reads; giving it the full locked canon is the
+strongest dedup signal and the simplest rule.
+
+### D47: The bible approval gate creates characters first, then resolves states, atomically
+
+`approveBible` (`src/lib/repo/bible.ts`) runs entirely inside one transaction. It
+creates or updates the approved characters first, then resolves every approved state
+to a character id (explicit id, else case-insensitive name match, which now includes
+the rows just created). This is what lets a state naming a not-yet-tracked character
+be approved in the same batch as that character's creation (SPEC A3). If any approved
+state still cannot resolve, an `UnmatchedStates` sentinel is thrown to roll the whole
+transaction back, so nothing is created (not the characters, not the facts), and the
+call returns the unmatched names, exactly the atomic-gate discipline of
+`approveExtraction` (D27). Two sub-decisions: a character UPDATE proposal (one that
+carries the id of an existing row) applies only its non-empty provided fields, so an
+empty proposal field never wipes existing character data; and states hard-require a
+book scope, enforced on the server (a series-wide scope with any approved state is
+rejected) not only hidden in the UI. Approved facts become LOCKED canon with source
+'bible' at the chosen scope (project_id null for series-wide); approved states land
+at chapter_order 0 with source 'bible' (effective from the book's first chapter
+onward).
+
+### D48: One-time focus-on-load uses a latching ref, not an effect that fires on every toggle
+
+`BibleImportPanel` focuses the first proposal row once when proposals arrive, using a
+`focusedOnLoadRef` latch that resets only when the checklist is cleared. It
+deliberately does NOT refocus row 0 whenever `facts`/`charRows`/`states` change (as a
+naive effect keyed on those would), because that steals focus back to row 0 on every
+approve/reject and breaks arrow navigation across the larger, three-section list.
+`ImportPanel`'s equivalent effect does refocus row 0 on each toggle, a latent quirk
+its narrower phase-6 sequence happens to tolerate (it only ever toggles the row it is
+already on); it was left untouched to avoid disturbing a passing test.
+
+### D49: The A3 e2e approves a world rule, a character, and a state, not the style note
+
+Phase 1's canon test asserts exactly five locked `style_rule` facts (the seeds).
+Approving a bible `style_rule` as a locked fact would make that count six and break an
+unrelated, out-of-scope test. The A3 acceptance check only requires approving a
+subset and verifying the approved items exist and the rejected ones leave no trace,
+so the e2e approves the world rule (which also carries the assembled-prompt check),
+the character, and the state, and leaves both the second world rule and the style
+note rejected (both asserted absent). This is a test-design choice to avoid coupling
+to another phase's fixed count, not a narrowing of the A3 gate.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

@@ -165,6 +165,54 @@ Return ONLY a JSON array with this exact shape, and nothing else:
 Return [] if there are no contradictions. Do not use em-dashes. No prose outside the JSON.`;
 }
 
+// Series-bible extraction (Amendment A3). Reads a pasted chunk of the author's
+// story bible plus the current canon list and tracked character names (to avoid
+// duplicate proposals) and returns a single JSON object carrying new-fact,
+// character, and character-state proposals. Nothing is written from this; the
+// caller renders proposals for the approval checklist.
+export function bibleExtractionPrompt(args: {
+  text: string;
+  currentCanon: string[];
+  knownCharacters: string[];
+}): string {
+  const canon = args.currentCanon.length
+    ? args.currentCanon.map((c) => `- ${c}`).join("\n")
+    : "(none yet)";
+  const chars = args.knownCharacters.length
+    ? args.knownCharacters.map((c) => `- ${c}`).join("\n")
+    : "(none tracked yet)";
+  return `You are importing an author's story bible for a fantasy series: the accumulated world rules, character sheets, timeline notes, and standing decisions that never lived in any chapter. Read the bible text below and propose three things as structured data:
+
+1. Canon facts the bible establishes: world rules, style rules, timeline events, durable character facts, and authorial plot decisions. Do NOT restate a fact already in the current canon below.
+
+2. Characters the bible describes, with any of: a one-line role, voice rules (dialect, verbal tics, what they would never say), physical description, and notes. Use the exact tracked name when a character is already tracked below, so it can be matched instead of duplicated.
+
+3. Character-state facts the bible gives as a starting point: what a named character knows, feels, or is hiding at the start. Only propose states for characters you also list in the characters array or that are already tracked.
+
+BIBLE TEXT
+${args.text}
+
+CURRENT CANON
+${canon}
+
+TRACKED CHARACTERS
+${chars}
+
+Return ONLY a JSON object with this exact shape, and nothing else:
+{
+  "facts": [
+    { "type": "world_rule | style_rule | timeline_event | character_fact | plot_decision", "content": "the fact, one sentence" }
+  ],
+  "characters": [
+    { "name": "the character name", "role": "one line or empty", "voice_rules": "voice constraints or empty", "physical": "physical description or empty", "notes": "notes or empty" }
+  ],
+  "states": [
+    { "character": "the character name", "knows": "what they know or empty", "feels": "how they feel or empty", "hiding": "what they hide or empty" }
+  ]
+}
+Use an empty array for any section with nothing to propose. Do not use em-dashes anywhere. No prose outside the JSON.`;
+}
+
 export interface InterrogationQuestion {
   question: string;
 }

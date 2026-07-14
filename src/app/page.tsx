@@ -11,7 +11,16 @@ export default function HomePage() {
   return (
     <main>
       <TopNav active="books" />
-      <h1 className="mt-6 font-serif text-xl">Books</h1>
+      <div className="mt-6 flex items-baseline justify-between">
+        <h1 className="font-serif text-xl">Books</h1>
+        <Link
+          href="/import-bible"
+          data-testid="import-bible-link"
+          className="text-sm text-neutral-600 hover:underline"
+        >
+          Import series bible
+        </Link>
+      </div>
       <ul className="mt-4 space-y-2" data-testid="book-list">
         {projects.map((p) => (
           <li key={p.id}>

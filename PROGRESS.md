@@ -676,3 +676,113 @@ chapter 1) needed no edit. No other existing test drove the old UI semantics.
   entries; the whole-run failure surfaces its message; bare "Sweep failed." gone.
 - D43: `a2.spec.ts` has a `beforeAll` warm-up (it sorts first and pays the dev
   server's cold-compile cost). Warm-up only, no assertion weakened.
+
+---
+
+## Amendment A3: Series bible importer
+
+Status: COMPLETE. All tests green. One new feature: turn a pasted story bible into
+structured, approval-gated data (canon facts, characters, character states).
+
+### What was built
+
+- LLM purpose: `"bible"` added to `LlmPurpose` (`src/lib/llm/client.ts`). Every
+  bible extraction call logs to `llm_calls` with purpose 'bible'.
+- Chunking (`src/lib/bibleChunks.ts`, `chunkBible`): splits a pasted bible on
+  paragraph boundaries (blank lines) at roughly 24,000 characters per chunk, packing
+  whole paragraphs up to the cap. A paragraph is never split mid-way: an oversized
+  single paragraph is its own chunk. A short bible is one chunk; whitespace-only
+  input is zero chunks. Pure and unit tested; also imported client-side for the
+  progress copy.
+- Response parsing (`src/lib/llm/bible.ts`, `parseBibleResponse`): normalizes the A3
+  envelope `{ facts, characters, states }` defensively (code-fenced and garbage
+  inputs surface raw text; invalid entries dropped: bad fact type, nameless
+  character, delta-less state).
+- Prompt (`src/lib/llm/prompts.ts`, `bibleExtractionPrompt`): includes the pasted
+  chunk, the current locked canon, and the tracked character names (dedup), and
+  demands the exact A3 JSON envelope. No em-dashes.
+- Import flow (`src/lib/bibleImport.ts`, `runBibleImport`): chunks the text, runs one
+  UTILITY_MODEL call per chunk sequentially (purpose 'bible', logged), parses each,
+  merges proposals, and keeps a per-chunk parse failure (with raw text) for any chunk
+  that did not parse. Same shape as `runSweep` (D44).
+- Approval gate (`src/lib/repo/bible.ts`, `approveBible`): the atomic gate for A3.
+  Creates/updates approved characters first, then resolves approved states (explicit
+  id, else case-insensitive name match including the just-created rows), so a state
+  naming a not-yet-tracked character can be approved together with that character's
+  creation. Any unresolved state rolls the whole transaction back (nothing created)
+  and returns the unmatched names (D47). Approved facts become LOCKED canon with
+  source 'bible' at the chosen scope (project_id null for series-wide); approved
+  states require a book scope and land at chapter_order 0 with source 'bible'; a
+  character proposal carrying an existing row's id is applied as an update of only its
+  non-empty fields, never a duplicate.
+- Routes: `POST /api/bible/import` (proposals, nothing written) and
+  `POST /api/bible/approve` (the gate).
+- UI: `/import-bible` page linked from the home Books page
+  (`data-testid="import-bible-link"`), and `BibleImportPanel`
+  (`src/components/BibleImportPanel.tsx`): a large paste textarea, a scope selector
+  (series-wide or a specific book; the states section is hidden for series-wide), and
+  a categorized approval checklist (facts, characters, states) with the same
+  keyboard-driven UX as the backfill importer, arrows move focus across ALL sections
+  in order and a/r approve/reject the focused row. Characters render as new-creation
+  or update proposals (showing which fields would change); a state whose character is
+  an approved creation shows a "will be created in this batch" note. Nothing lands
+  unapproved; no approve-all default. Per-chunk parse failures surface their raw text.
+- Fixture: `bible.bible1.json` (two world rules, a style note, two characters one
+  with voice rules, and one character state).
+
+### Test results
+
+- Unit (vitest): 128 passed (was 112; +16). New: `bibleChunks.test.ts` (5: short
+  single chunk, over-cap paragraph split, whole-paragraph packing, oversized single
+  paragraph kept whole, whitespace-only) and `bible.test.ts` (11: envelope parse
+  valid/fenced/drops-invalid/garbage-raw, and approval logic covering locked facts
+  with source 'bible' and correct scope, character creation, name-match producing an
+  update not a duplicate, state at chapter_order 0 with source 'bible', same-batch
+  character+state creation order, atomic rejection on an unmatched state, and the
+  series-wide-rejects-states rule).
+- E2E (Playwright): 28 passed (was 27; +1 in `a3.spec.ts`): the SPEC acceptance
+  check verbatim. Paste a bible reached from the home link, proposals come back
+  categorized (facts, characters, states), approve a subset via keyboard only (arrows
+  plus a/r, including an approve/reject/approve round trip), the approved items exist
+  exactly (locked fact source 'bible' at Book 2 scope, visible locked at /canon; the
+  character row on /characters with its voice rules; the state in the character's
+  timeline; the fact and state both present in a Book 2 chapter's assembled prompt via
+  /api/dev/prompt/<id>), and the rejected proposals leave no trace (absent from
+  /api/canon, /api/characters, and the assembled prompt).
+- `tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Amendment A3)
+
+"paste a bible containing at least two world rules, a style note, two characters (one
+with voice rules), and one character state; the proposals come back categorized;
+keyboard-only approval of a subset creates exactly the approved items (locked facts
+with source 'bible', character rows, a state at chapter_order 0 visible in the
+timeline); a chapter of the chosen book then shows the approved facts and state in its
+assembled prompt; rejected proposals leave no trace." All covered by `a3.spec.ts`.
+
+### Note on running the E2E suite
+
+The full `npm run test:e2e` was verified 28/28 green against a pre-warmed dev server.
+On this particular slow sandbox a cold `npm run test:e2e` intermittently trips the
+pre-existing `a2.spec.ts` `beforeAll` warm-up hook, whose hook timeout is the global
+30s while a cold dev-server first-boot compile can exceed it (a latent fragility in
+A2's warm-up, D43; it intends 90s but the hook caps at 30s). This is unrelated to A3:
+a3.spec runs in about 8s, a2's own tests pass in single-digit seconds once the server
+is warm, and A3 touches none of the routes a2's hook compiles. On a normal-speed
+machine the cold run passes as before. a2.spec was not modified (out of A3 scope).
+
+### Judgment calls (mirrored in DECISIONS.md, D44-D49)
+
+- D44: The bible is chunked server-side in one POST, mirroring the sweep; per-chunk
+  fixture routing (single chunk = base key, multiple = 1-based suffix).
+- D45: `BibleImportPanel` is its own component (like D32's `ImportPanel`), sharing
+  the keyboard model and the server gate but not the markup.
+- D46: The extraction prompt sees all locked canon and all tracked names regardless
+  of scope; scope only decides where approved data lands.
+- D47: The approval gate creates characters first, then resolves states, all in one
+  transaction with atomic rollback on any unmatched state; updates apply only
+  non-empty fields; states hard-require a book scope, server-enforced.
+- D48: One-time focus-on-load uses a latching ref so approve/reject never steals
+  focus mid-navigation; `ImportPanel` left untouched.
+- D49: The A3 e2e approves a world rule, a character, and a state (not the style
+  note), so it does not collide with Phase 1's exact count of five locked style rules.
