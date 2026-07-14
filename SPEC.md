@@ -425,3 +425,13 @@ Configuration: .env.example documents LLM_TRANSPORT (default claude-code), CLAUD
 Testing: the automated loop stays fixture-only. Unit tests cover the transport-selection matrix (fixture / claude-code default / explicit api-key) and pure functions for building the CLI argument list and parsing the CLI's JSON and stream-JSON outputs into text and usage (fed with captured sample outputs, no real calls, no spawned processes). A manual smoke script (npm run llm-smoke) makes one tiny real call through the selected transport and prints the reply and logged usage; it exists for a human (or the orchestrator) to verify auth end to end and is not part of npm test.
 
 Acceptance check: with fixtures off on an authenticated machine, the smoke script returns real model text through the claude-code transport and a real drafting call works in the app with no ANTHROPIC_API_KEY set; the full automated suite passes unchanged on fixtures; llm_calls rows from claude-code calls carry token counts.
+
+### A5.1 (2026-07-13): Chat fixes from the live test drive
+
+Two small corrections found driving A5 with real model output:
+
+A5.1a No narration, no author. The chat system prompt gains explicit rules: the character speaks ONLY in the first person; no third-person stage directions (the live drive produced lines like "She pulled the edge of her left glove straighter"); no reference to the author or to anyone outside the conversation except through the [MISSING FACT] marker line. Unit-assert the rules are present in the assembled system prompt.
+
+A5.1b Pin validation. The pin form accepted chapter 13 in a four-chapter book. The chat page clamps the pinned chapter to [1, number of chapters in the selected book] and shows the valid range; the chat route rejects an out-of-range pin with a clear error. Pinning past the last chapter is not a use case v1 supports; the last chapter means "end of book so far".
+
+Deferred (recorded, not built): per-conversation CLI session reuse via the claude binary's resume capability, so chat turns on the claude-code transport hit the provider cache (the drive measured cache writes every turn but zero reads across one-shot spawns). Revisit if chat becomes heavy.
