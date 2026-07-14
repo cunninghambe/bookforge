@@ -934,6 +934,69 @@ matching quotes, no interpolation) and is now imported by both the llm-smoke scr
 satisfying the SPEC A6 "loads .env.local the way llm-smoke does" requirement by genuine
 reuse rather than a second copy.
 
+---
+
+## Canon filter race fix
+
+### D81: No new unit test for the CanonManager sequence guard
+
+Fix for a diagnosed E2E-reproducible race: `CanonManager.tsx`'s `load()` fetched
+`/api/canon` on every filter change with no request sequencing, so a late response
+for an earlier (now-stale) filter combination could overwrite a fresher, correctly
+filtered response and silently show stale data. Fixed with a monotonically
+increasing request id held in a `useRef`; each `load()` call captures its own id and
+only applies its response if that id is still the latest when the fetch resolves.
+
+Audited every other list component in `src/components` for the identical shape (a
+load/fetch keyed to multiple independently user-changeable filter states, fired on
+every change with no sequencing). None match: `CharactersManager.tsx`'s top-level
+`load()` has empty `useCallback` deps (fires once on mount plus after each create
+action, never concurrently from user input); its `CharacterCard`'s `loadStates()` is
+keyed to the stable `character.id` and only refires on `expanded` toggling, not on a
+changing query; `Sequencer.tsx`'s `load()` is keyed to `projectId`, fixed per page.
+Only `CanonManager.tsx` was changed.
+
+No new unit test was added. This repo deliberately has no React component-testing
+library installed, and the guard is a closure over component state/refs, not a pure
+function worth extracting for one narrowly-scoped fix. Instead,
+`tests/e2e/phase1.spec.ts` ("seeded style rules render as locked") was strengthened
+to wait for the specific type+status filtered `/api/canon` response before asserting
+(mirroring the existing wait pattern in `tests/e2e/phase2.spec.ts` "reorder persists
+across reload"), which is a genuine regression test for this exact race: it fails
+without the guard and passes with it. Simplest compliant fix; no assertion weakened.
+
+---
+
+## Login navigation race fix (cold-start flake cluster, follow-up)
+
+### D82: router.refresh() removed from the login success path
+
+The login page ran `router.push("/canon")` immediately followed by
+`router.refresh()`. The refresh re-fetches the CURRENT route and can cancel the
+in-flight push navigation on a slow (cold dev) server: warm servers win the race,
+cold ones lose it, leaving the URL stuck on /login for 30+ seconds even though the
+login API returned 200 and the cookie was set (independently reproduced in a manual
+browser session: POST 200, no navigation). Fixed by removing the `refresh()` call
+entirely rather than sequencing it after the navigation: pushing to a new route
+fetches fresh server components anyway, so the refresh was redundant, and removal
+is the simplest compliant fix. A comment at the call site says why refresh must not
+be reintroduced. The hardened `tests/e2e/helpers.ts` `login()` (pre-hydration click
+retry until the API responds, plus diagnostic breadcrumb) covers the OTHER layer of
+this cluster and was deliberately left exactly as hardened.
+
+### D83: phase2's reload assertion waits for the rows instead of re-running
+
+The first fully cold validation run after D82 failed
+`tests/e2e/phase2.spec.ts` "reorder persists across reload" with
+`indexOf` returning -1 for BOTH titles. The failure snapshot showed both chapter
+rows present and in the correct order at failure time, so the product was correct;
+the test read `allInnerTexts()` immediately after `page.reload()`, and
+`allInnerTexts` does not auto-wait, so on a cold server it captured the client-side
+list before the rows rendered. Strengthened, not weakened: two strictly additional
+`toHaveCount(1)` waits for the two rows now precede the order check, and the order
+assertion itself is byte-for-byte unchanged. Chosen over re-running until green
+(hides the race) and over a fixed timeout (slow and still racy).
+
 ## Deferred feature idea (recorded, not built)
 
 ### CLI session reuse for chat caching (from A5.1)

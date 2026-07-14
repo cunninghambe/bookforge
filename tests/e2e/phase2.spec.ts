@@ -56,6 +56,16 @@ test.describe("Phase 2: sequencer", () => {
     ]);
 
     await page.reload();
+    // The chapter list loads client-side after reload, and allInnerTexts()
+    // does not auto-wait, so on a slow (cold) server it can capture the list
+    // before the rows render. Wait for both rows first (strictly additional
+    // assertions), then check the order exactly as before.
+    await expect(
+      page.getByTestId("chapter-title").filter({ hasText: t1 }),
+    ).toHaveCount(1);
+    await expect(
+      page.getByTestId("chapter-title").filter({ hasText: t2 }),
+    ).toHaveCount(1);
     const titles = await page.getByTestId("chapter-title").allInnerTexts();
     expect(titles.indexOf(t2)).toBeLessThan(titles.indexOf(t1));
   });

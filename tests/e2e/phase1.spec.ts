@@ -31,7 +31,20 @@ test.describe("Phase 1: canon manager", () => {
   test("seeded style rules render as locked", async ({ page }) => {
     // Filter to style_rule + locked to isolate the seeds.
     await page.getByLabel("Filter by type").selectOption("style_rule");
-    await page.getByLabel("Filter by status").selectOption("locked");
+    // Wait for the combined type+status filtered response so a slower,
+    // now-stale type-only response cannot land after it and overwrite the
+    // list (mirrors the wait pattern in phase2.spec.ts "reorder persists
+    // across reload").
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.url().includes("/api/canon") &&
+          r.url().includes("type=style_rule") &&
+          r.url().includes("status=locked") &&
+          r.ok(),
+      ),
+      page.getByLabel("Filter by status").selectOption("locked"),
+    ]);
     const rows = page.getByTestId("canon-row");
     await expect(rows).toHaveCount(5);
     // Each seeded row shows a locked status.

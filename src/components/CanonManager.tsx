@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const TYPES = [
   "world_rule",
@@ -40,8 +40,14 @@ export function CanonManager({ projects }: { projects: Project[] }) {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterScope, setFilterScope] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  // Sequence guard: filter changes can fire overlapping /api/canon requests.
+  // Only the response for the most recently issued request is applied, so a
+  // late-arriving response for a stale filter combination cannot overwrite
+  // the result of a request issued after it.
+  const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     const params = new URLSearchParams();
     if (filterType !== "all") params.set("type", filterType);
@@ -49,6 +55,7 @@ export function CanonManager({ projects }: { projects: Project[] }) {
     if (filterScope !== "all") params.set("scope", filterScope);
     const res = await fetch(`/api/canon?${params.toString()}`);
     const data = await res.json();
+    if (requestIdRef.current !== requestId) return;
     setFacts(data.facts ?? []);
     setLoading(false);
   }, [filterType, filterStatus, filterScope]);

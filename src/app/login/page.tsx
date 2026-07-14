@@ -20,8 +20,9 @@ export default function LoginPage() {
     });
     setBusy(false);
     if (res.ok) {
+      // push() alone: a refresh() here races and cancels the push on slow
+      // (cold) servers, leaving the URL stuck on /login. Do not reintroduce.
       router.push("/canon");
-      router.refresh();
     } else {
       setError("Incorrect password.");
     }

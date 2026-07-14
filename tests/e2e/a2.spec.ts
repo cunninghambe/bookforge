@@ -31,14 +31,12 @@ test.describe("Amendment A2", () => {
   // compile cost. Warm the routes the per-test login and the tests hit, with a
   // generous budget, so the 20s login helper below is never racing a cold compile.
   test.beforeAll(async ({ browser }) => {
-    // The hook itself must outlive its inner 90s waits; the default hook
-    // timeout is 30s, which a truly cold first compile can exceed.
-    test.setTimeout(180_000);
+    // The hook itself must outlive its inner waits; the default hook timeout
+    // is 30s, which a truly cold first compile can exceed. The login helper
+    // carries the pre-hydration click-retry hardening.
+    test.setTimeout(240_000);
     const page = await browser.newPage();
-    await page.goto("/login", { timeout: 90_000 });
-    await page.getByLabel("Password").fill("test-password");
-    await page.getByRole("button", { name: "Enter" }).click();
-    await expect(page).toHaveURL(/\/canon/, { timeout: 90_000 });
+    await login(page);
     await page.goto("/characters", { timeout: 90_000, waitUntil: "networkidle" });
     await page.close();
   });

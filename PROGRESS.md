@@ -1202,3 +1202,136 @@ llm_calls." All covered by `mcp-server.test.ts`, spawning the real server.
   param, source "mcp" provenance, interrogate_chapter running the LLM like the route,
   the hard boundary implementation, the 1-based conversion at the tool boundary, and
   the extracted shared .env.local loader.
+
+---
+
+## Canon filter race fix
+
+Status: COMPLETE. One diagnosed bug, no new feature.
+
+### The bug
+
+`CanonManager.tsx`'s `load()` fetches `/api/canon` on every filter change with no
+request sequencing. Changing two filters quickly (type then status, as in the
+seeded-style-rules test) fires two overlapping fetches; if the first (type-only)
+response lands after the second (type+status) response, it silently overwrites the
+correctly filtered list with a stale one. Under cold-server latency variance in the
+full E2E suite (earlier specs seed provisional facts that sort ahead of the locked
+seeds), this flipped a row's rendered status from "locked" to "provisional" after
+the count assertion had already passed.
+
+### What was built
+
+- `CanonManager.tsx`: a monotonically increasing request id in a `useRef`. `load()`
+  captures its own id at call time; when its fetch resolves, the response is applied
+  (`setFacts`, `setLoading(false)`) only if that id still matches the ref's current
+  value, i.e. only if no newer `load()` call has started since. A stale response is
+  silently dropped instead of overwriting fresher data.
+- Audited every other list component in `src/components` for the identical shape
+  (a `load`/fetch keyed to multiple independently user-changeable filter states,
+  fired on every change with no sequencing). None match: `CharactersManager.tsx`'s
+  top-level `load()` has no filter dependencies (empty `useCallback` deps, fired
+  once on mount plus after each create action, never concurrently); its
+  `CharacterCard`'s `loadStates()` is keyed only to the stable `character.id` and
+  only refires on `expanded` toggling, not on a changing query. `Sequencer.tsx`'s
+  `load()` is keyed to `projectId`, which is fixed per page, not user-changeable.
+  No other component in `src/components` fetches a list keyed to changing filter
+  state. No other file was changed.
+- `tests/e2e/phase1.spec.ts`, "seeded style rules render as locked": after
+  selecting the status filter (the second of the two filter changes), the test now
+  waits for the `/api/canon` response whose query string carries both
+  `type=style_rule` and `status=locked` before asserting, the same
+  `Promise.all([page.waitForResponse(...), <the action that triggers it>])` pattern
+  already used in `tests/e2e/phase2.spec.ts` ("reorder persists across reload").
+  Every existing assertion (`toHaveCount(5)`, the per-row "locked" status check) is
+  unchanged.
+
+### Test results
+
+- Unit (vitest): 208 passed, unchanged count (no new unit test added; see judgment
+  call below).
+- `npx tsc --noEmit`: clean.
+- E2E (Playwright): 32 passed, unchanged count. Two cold runs (deleted `.next`
+  before each) both reproduced the pre-existing, already-documented (D43)
+  `a2.spec.ts` `beforeAll` warm-up flake (its 30s hook timeout against a cold
+  first-compile that can exceed it), unrelated to this fix: 29 passed, 1 failed
+  (`a2.spec.ts` "A2.1 regression..."), 2 did not run, in both cold attempts. The
+  target test, `phase1.spec.ts` "seeded style rules render as locked", passed in
+  both cold runs regardless. Two subsequent warm runs (server already compiled)
+  each passed 32/32 cleanly. No assertion was weakened or skipped to reach green.
+
+### Judgment call (mirrored in DECISIONS.md, D81)
+
+- D81: No new unit test was added for the sequence guard. This repo has no React
+  component-testing library installed (per SPEC/PROGRESS convention, not adding new
+  test dependencies for one fix), and `load()`'s guard logic is a closure over React
+  state/refs, not a pure extractable function worth pulling out for this one
+  narrowly-scoped fix. The strengthened E2E assertion (waiting for the specific
+  filtered response) is the regression test: it fails without the guard under the
+  same race the original bug report describes, and passes with it.
+
+---
+
+---
+
+## Login navigation race fix (cold-start flake cluster, follow-up)
+
+Status: COMPLETE. Follow-up to the canon filter race fix: the cold-run a2 failure
+observed above (stuck on /login for the full timeout) was subsequently diagnosed as
+a real product bug, not only the D43 warm-up fragility the section above attributed
+it to. That attribution is superseded by this section.
+
+### The bug
+
+`src/app/login/page.tsx` ran `router.push("/canon")` immediately followed by
+`router.refresh()` on successful login. The `refresh()` re-fetches the CURRENT
+route and can cancel the in-flight push navigation on a slow (cold dev) server;
+warm servers win the race, cold ones lose it, leaving the URL stuck on /login for
+30+ seconds even though the login API returned 200 and the session cookie was set.
+The same symptom (POST 200, no navigation) was independently observed in a manual
+browser session. A separate layer of the same cluster, the pre-hydration click
+loss, was already handled by the hardened `tests/e2e/helpers.ts` `login()`
+(fill-and-click retried until the login API actually responds); that helper is
+deliberately unchanged here.
+
+### What was built
+
+- `src/app/login/page.tsx`: removed the `router.refresh()` call. Pushing to a new
+  route fetches fresh server components anyway, so the refresh was redundant, and
+  it was the navigation-canceling suspect. A comment at the call site states why
+  refresh must not be reintroduced.
+- `tests/e2e/phase2.spec.ts` ("reorder persists across reload"), strengthened,
+  nothing weakened: the first fully cold validation run after the login fix
+  exposed a latent race in this test itself. After `page.reload()` it read
+  `allInnerTexts()` immediately, and `allInnerTexts` does not auto-wait, so on a
+  cold server it captured the client-side chapter list before the rows rendered
+  (both `indexOf` calls returned -1; the failure snapshot showed both rows present
+  and in the correct order at failure time, so the product behavior was correct).
+  The test now waits for both chapter rows to render (two strictly additional
+  `toHaveCount(1)` assertions) before reading the order; the order assertion
+  itself is byte-for-byte unchanged.
+- Unchanged, deliberately: `tests/e2e/helpers.ts` (the hardened login retry), the
+  phase1 `waitForResponse` strengthening, and the CanonManager sequence guard.
+
+### Test results
+
+- Unit (vitest): 208 passed, unchanged. `npx tsc --noEmit`: clean.
+- E2E, verbatim history for this follow-up:
+  - Fully cold run 1 (`.next` deleted; login fix in, phase2 not yet
+    strengthened): 31 passed, 1 failed (`phase2.spec.ts` "reorder persists across
+    reload", the `allInnerTexts` capture race above). The previously flaking
+    a2.spec login path passed cold. This run also logged a one-off transient
+    dev-server error ("Failed to generate static paths for
+    /api/chapters/[id]/lock: TypeError: __webpack_require__.C is not a function")
+    that failed no test (the lock test itself passed in the same run).
+  - Fully cold run 2 (`.next` deleted again; phase2 strengthened): 32 passed.
+  - Warm run (server already compiled): 32 passed.
+
+### Judgment calls (mirrored in DECISIONS.md, D82-D83)
+
+- D82: `router.refresh()` removed from the login success path rather than
+  sequenced after the navigation; push alone is correct and the refresh was the
+  cancellation suspect.
+- D83: The phase2 reload assertion was strengthened with explicit row-visibility
+  waits instead of re-running until green; `allInnerTexts` does not auto-wait and
+  the failure snapshot proved the product was correct.
