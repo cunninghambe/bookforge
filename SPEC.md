@@ -451,3 +451,30 @@ API: GET and PUT /api/settings/models (the full purpose map), POST /api/settings
 Testing: automated loop stays fixture-only (a model_test fixture backs the Test button in e2e). Unit: resolver precedence (override beats env beats fallback; unknown purpose rejected), settings repo round-trip, migration idempotence for the settings table and the llm_calls model column. E2E: set an override for draft on /settings, run a fixture draft, assert the llm_calls row records the overridden model (dev readback route); reset restores the env default (asserted the same way); the Test button returns ok under fixtures. The real invalid-model error path is unit-tested at the error-mapping level and verified manually via the real transport, not in the automated loop.
 
 Acceptance check: with an override set for chat, a chat call logs that model in llm_calls while draft calls still log the draft default; clearing the override reverts the next call; the Test button run manually on this machine against the claude-code transport accepts a valid id and shows a clear verbatim error for a nonsense id.
+
+### A9 (2026-07-14): Design pass with dark mode
+
+Purpose: the UI is functional but visually plain and light-only. This amendment makes it a genuinely good writing-tool interface with a light/dark toggle. The original aesthetic contract still governs: calm, text-forward, fast, no dashboard aesthetics. Good here means quiet confidence and typographic care, not decoration.
+
+Theme mechanics:
+- Two themes only, light and dark, chosen by an explicit toggle in the top navigation. No system-preference mode.
+- The choice persists in a long-lived plain cookie readable by the server. The root layout reads it and stamps the dark class on the html element at server render, so there is never a flash of the wrong theme. The login page (pre-auth) is themed the same way.
+- Tailwind class strategy (darkMode "class").
+
+Design system, one place to change things:
+- Semantic color tokens as CSS variables defined per theme in globals.css and mapped into the Tailwind theme (for example paper, ink, muted, chrome surface, chrome border, accent, and the alert families amber/sky/red/green). Components use the semantic tokens; raw palette classes like bg-white or border-neutral-200 disappear from components entirely.
+- Light: keep the warm paper feel (do not go clinical white). Dark: warm dark gray paper (never pure black), off-white ink, FULL contrast preserved on reading surfaces (draft editor, review prose, chat, summaries), slightly reduced contrast on chrome. Alert colors legible in both themes.
+- Typography: a deliberate scale (page title, section, body, caption), system serif for all prose reading surfaces with comfortable line-height and a bounded measure (roughly 70ch) so long chapters read well; system sans for chrome.
+- Interaction polish: a clear button hierarchy (primary, secondary, quiet, destructive), consistent input and select styling, visible keyboard focus rings (focus-visible) everywhere including the keyboard-driven approval checklists, hover states, and consistent spacing rhythm across pages.
+- Considered empty states (no chapters yet, no facts match, no states yet) instead of bare gray one-liners.
+- A simple favicon (a minimal book glyph, inline SVG or .ico) so the tab is identifiable.
+- No animations beyond subtle transitions on hover/focus and theme change; no shadows-heavy cards; no dashboard styling. Desktop only, as ever.
+
+Scope: every page and component (login, home, canon, characters, character chat, sequencer, draft, prompt inspector, review, sweep, import, import-bible, settings, TopNav, all alert/panel components). All existing data-testid attributes and aria labels stay exactly as they are so the e2e suite is undisturbed.
+
+Testing and acceptance:
+- All existing tests pass unchanged (222 unit, 34 e2e, cold-capable).
+- New e2e: the toggle switches the html class and persists across reload and across pages; a server-rendered request with the cookie set arrives with the dark class already present (no-flash assertion at the HTML level).
+- A repo-level check (unit test or lint script run in npm test) asserting components contain no raw bg-white / bg-neutral- / border-neutral- / text-neutral- classes, so the token system cannot silently erode.
+- Screenshot evidence for review: a script or test that captures both themes across the main pages (login, canon, characters, chat, draft, review, settings) into a local folder for the orchestrator's visual review. Screenshots are review artifacts, not committed assertions.
+- The em-dash rule applies to all new UI copy.
