@@ -891,3 +891,122 @@ assertion was changed.
 Recorded in DECISIONS.md as D50-D57. Every A4 ambiguity (SDK type bridge, prefix
 byte-identity, the mode-selection and fallback design that preserves the Phase 4 path,
 the em-dash-on-replacements lint, and the dev readback route) is captured there.
+
+---
+
+## Amendment A5: Character chatbots
+
+Status: COMPLETE. All tests green. One new feature: talk to a character in their
+own voice, pinned to a moment in the story, to audition dialogue and test whether a
+beat is in voice. Chat is ephemeral (client-state only); nothing enters canon except
+through the explicit propose-as-provisional-fact gate. Its prerequisite (dense
+character states, A1) was already built.
+
+### What was built
+
+- Pure context-assembly module (`src/lib/chat.ts`), the star of the amendment and
+  the piece A6's MCP server will reuse. `buildChatContext(db, { characterId,
+  projectId, uiChapter })` returns the chat `system` prompt (fixed knowledge-hygiene
+  and voice rules), the `contextPrefix` (the A4.1 cacheable prefix carrying the
+  character card, effective state as of the pin, locked style rules, locked
+  character_fact canon mentioning the character, and the knowledge-horizon chapter
+  summaries), plus the structured pieces (effectiveState, characterFacts,
+  chapterSummaries, styleRules) so it is easy to test and reuse. The pin is 1-based
+  (A2); it converts once through `uiChapterToOrder`. Effective state uses the existing
+  `effectiveState` semantics (most recent state row with chapter_order <= pin).
+  Character facts are `assemblableCanon` character_facts (series-wide plus pinned
+  book) filtered to those mentioning the character by word-boundary name match.
+  Summaries are the locked chapters of the pinned book with order_index <= pin, in
+  order. `buildChatRemainder({ characterName, history, message })` serializes the
+  transcript plus the new message into the uncached remainder. No route, streaming,
+  or persistence concerns live in the module.
+- LLM purpose `"chat"` added to `LlmPurpose` (`src/lib/llm/client.ts`).
+- Route `POST /api/characters/[id]/chat`
+  (`src/app/api/characters/[id]/chat/route.ts`): body `{ projectId, uiChapter,
+  history, message, fixtureKey? }`. Builds the context, passes `contextPrefix` as the
+  A4.1 `promptPrefix` and the transcript+message as the remainder, and streams the
+  reply on the exact CONTROL_DELIM protocol the draft route uses (raw text chunks,
+  then a control frame with the clean marker-stripped reply, `missingFacts`,
+  `retried`, `emDashUnresolved`). Em-dash lint: hard reject, regenerate once with an
+  explicit instruction (fixtureKey `.retry`), then flag `emDashUnresolved`. Uses
+  UTILITY_MODEL. Logs one `llm_calls` row, purpose `"chat"`, chapterId null.
+- Page `/characters/[id]/chat/page.tsx` linked from a "Chat" action on each character
+  card in `CharactersManager.tsx` (`data-testid="chat-link"`). Client
+  `CharacterChat.tsx`: the session opens with the bot asking when in the book it is;
+  no chat surface renders until the moment is pinned (book select + 1-based chapter
+  number). The pin stays visible; "Change the moment" clears the conversation and
+  re-opens the pin form (state boundaries differ, so a transcript from another moment
+  would leak). Messages stream into bot bubbles. Each bot reply carries a "Propose as
+  canon fact" action opening an inline form (type selector defaulting to
+  character_fact, content prefilled with the reply and editable, scope defaulting to
+  the pinned book) that POSTs to the existing `/api/canon` with status `provisional`
+  and source `chat:<characterId>`. Missing-fact lines surface as a subtle per-reply
+  note; an unresolved em-dash surfaces as a per-reply warning.
+- Dev-only readback route `GET /api/dev/tables`
+  (`src/app/api/dev/tables/route.ts`, disabled in production like the other dev
+  routes) returns the SQLite table names, so the e2e can assert no chat/transcript
+  table exists.
+- Chat history is client-state only. No DB table, no migration, no storage writes for
+  transcripts (verified by the e2e table-name check and the unit-level knowledge that
+  the route only ever calls `logLlmCall` and `buildChatContext`, neither of which
+  writes chat content).
+- Fixtures: `chat.chat1.json` (an in-voice reply) and `chat.chat2.json` (an
+  in-character refusal about a post-pin event plus a `[MISSING FACT]` line).
+
+### Test results
+
+- Unit (vitest): 157 passed (was 150; +7 in `chat.test.ts`): pinning at UI chapter 3
+  includes the chapter-1 state and NOT the chapter-4 state; summaries include locked
+  chapters up to the pin only (chapters 1..4 locked, pin 3 excludes chapter 4);
+  character_fact selection includes series-wide and pinned-book facts mentioning the
+  character and excludes a Book-2 fact and a non-matching fact; the system prompt
+  carries the hygiene rules and the `[MISSING FACT]` instruction; the assembled prompt
+  has no em-dash; an unknown character throws; and `buildChatRemainder` serializes the
+  transcript with Author/character speakers ending primed for the reply.
+- E2E (Playwright): 32 passed (was 30; +2 in `a5.spec.ts`): the SPEC acceptance
+  check. Create the character, states, and locked chapters via API; open the chat
+  page; no chat input exists before pinning; pin at chapter 3; send a message and the
+  fixture reply streams into a bot message; "Propose as canon fact" creates a
+  provisional fact with source `chat:<id>` at the pinned book scope, visible at /canon
+  and asserted via the API; and `/api/dev/tables` shows no chat/transcript/message
+  table. A second test pins at chapter 3 with the refusal fixture, asks about a
+  post-pin event, and asserts the in-character refusal plus the surfaced
+  missing-fact note (the `[MISSING FACT]` line stripped from the reply).
+- `tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Amendment A5)
+
+"with a character that has voice_rules and two states (effective from chapters 1 and
+4), pinning at chapter 3 assembles a context containing the chapter-1 state and NOT
+the chapter-4 state, and only summaries of locked chapters up to 3; a fixture-driven
+reply streams into the chat; asking about a post-pin event yields an in-character
+refusal; a reply's propose-as-canon-fact creates a provisional fact with source
+'chat:<id>' visible at /canon; the database contains no chat transcript afterward."
+The context-boundary parts are covered by `chat.test.ts` (the pure module); the
+streaming reply, refusal, propose-fact gate, and no-transcript parts by `a5.spec.ts`.
+
+### Note on running the E2E suite
+
+The full `npm run test:e2e` was verified 32/32 green against a pre-warmed dev server.
+As already documented for A3 (D43), on this slow sandbox a cold `npx playwright test`
+can trip the pre-existing `a2.spec.ts` `beforeAll` warm-up hook (its cold first-compile
+can exceed the hook timeout), which skips a2's two tests. That is an environmental
+flake in a2's warm-up, unrelated to A5: a5.spec sorts before the phase specs and its
+data does not collide with their unique-phrase assertions on a fresh DB. Warming the
+dev server first (or running on a normal-speed machine) yields a clean 32/32. a2.spec
+was not modified (out of A5 scope).
+
+### Judgment calls (mirrored in DECISIONS.md, D58-D62)
+
+- D58: The chat prompt is split into a fixed `system` (hygiene + voice rules) and a
+  per-session `contextPrefix` (character card, state, style rules, facts, summaries),
+  the latter passed as the A4.1 promptPrefix; the transcript+message is the remainder.
+- D59: The pure module returns both the rendered strings and the structured pieces, so
+  the boundary behavior is unit-tested directly and A6 can reuse the assembly.
+- D60: `GET /api/dev/tables` is the simplest compliant "no chat transcript" assertion.
+- D61: Propose-as-fact prefills the full reply text (the "or a selection of it" left as
+  a manual edit in the editable textarea) and defaults type character_fact, scope the
+  pinned book, status provisional, source `chat:<characterId>`.
+- D62: Chat replies stream on the same CONTROL_DELIM protocol and em-dash
+  reject-retry-then-flag discipline as drafting, reusing `extractMarkers` for the
+  `[MISSING FACT]` lines.

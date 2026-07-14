@@ -13,7 +13,8 @@ export type LlmPurpose =
   | "sweep"
   | "draft"
   | "revision"
-  | "bible";
+  | "bible"
+  | "chat";
 
 export interface CompleteOptions {
   purpose: LlmPurpose;

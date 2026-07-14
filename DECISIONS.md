@@ -667,6 +667,72 @@ chapter's character count (a full rewrite of the ~600 char chapter would log wel
 100 output tokens; the patch envelope logs 48). This was the simplest compliant way to
 assert the token win end to end without weakening any existing check.
 
+## Amendment A5 (2026-07-13): Character chatbots
+
+### D58: The chat prompt splits into a fixed system and a cacheable character-context prefix
+
+SPEC A5 requires the character context to be the A4.1 cacheable prefix and the
+running transcript plus new message to be the variable remainder. `buildChatContext`
+(`src/lib/chat.ts`) therefore returns three parts: a `system` string holding the fixed
+knowledge-hygiene and voice rules (character-agnostic template, filled only with the
+character name for readability, so it is stable across turns and cacheable); a
+`contextPrefix` string holding the character card, the effective state as of the pin,
+the locked style rules, the locked character_fact canon mentioning the character, and
+the knowledge-horizon chapter summaries (the promptPrefix); and the remainder is built
+separately by `buildChatRemainder` from the transcript and the new message. The route
+passes `system`, `promptPrefix: contextPrefix`, and `prompt: remainder`, so every turn
+after the first reads the cached system + context and resends only the short tail. The
+dialogue-subtext rule comes from including the locked style_rule facts in the context;
+the character's own voice_rules ride in the character card. This keeps the whole
+context assembly in one pure, importable module with no route, streaming, or
+persistence concerns, so A6's MCP server can reuse it unchanged.
+
+### D59: The pure module returns structured pieces alongside the rendered strings
+
+`buildChatContext` returns `effectiveState`, `characterFacts`, `chapterSummaries`, and
+`styleRules` in addition to the rendered `system` and `contextPrefix`. This lets the
+unit test assert the context-boundary semantics directly (the chapter-1 state is
+present and the chapter-4 state absent at pin 3; summaries stop at the pin; character
+facts are scoped and name-filtered) rather than only string-grepping the prefix, and
+it gives A6's `character_chat` tool the same structured data without re-deriving it.
+The rendered strings are still asserted too (hygiene rules, `[MISSING FACT]`, no
+em-dash), since those are what the model actually receives.
+
+### D60: A dev-only table-name route backs the no-transcript assertion
+
+SPEC A5's acceptance check says the database must contain no chat transcript and
+offers "sqlite table list has no chat table" as the simplest compliant assertion.
+`GET /api/dev/tables` (`src/app/api/dev/tables/route.ts`, disabled in production like
+`/api/dev/prompt` and `/api/dev/llm-calls`) returns the SQLite table names from
+`sqlite_master`, and the e2e asserts none matches `/chat|transcript|message/i`. This
+is the least invasive way to prove non-persistence end to end without opening the DB
+file from the test process or coupling to `DATABASE_PATH`. No chat table, migration,
+or repo write path was added; the route only ever calls `logLlmCall` (a cost row,
+purpose "chat", chapterId null) and the read-only `buildChatContext`.
+
+### D61: Propose-as-fact prefills the full reply, defaults character_fact / pinned book / provisional
+
+SPEC A5 leaves the propose-as-canon-fact form's exact prefill a judgment call ("the
+reply or a selection of it"). Chosen: the editable content textarea is prefilled with
+the full reply text, and the author trims it to a selection by hand if they want less;
+this is the simplest compliant behavior and keeps the whole reply available. The type
+selector defaults to character_fact (the chatbot's subject), the scope selector
+defaults to the pinned book (with a series-wide option), and the POST to the existing
+`/api/canon` sets status `provisional` and source `chat:<characterId>`. Nothing
+auto-locks; the fact must pass the normal canon lock flow, so the approval gate is not
+softened and chat cannot write locked canon.
+
+### D62: Chat reuses the drafting stream protocol and em-dash discipline verbatim
+
+The chat route streams on the same `CONTROL_DELIM` sentinel protocol as the draft
+route (raw prose chunks, then a JSON control frame), reuses `extractMarkers` to strip
+and surface `[MISSING FACT]` lines, and applies the same em-dash lint (hard reject,
+regenerate once with an explicit instruction on the `.retry` fixtureKey, then set
+`emDashUnresolved` and never silently accept). Mirroring the established path rather
+than inventing a chat-specific protocol keeps the client consumption identical to the
+draft editor's and keeps the forbidden-character rule enforced on the chat path too.
+The reply is non-persisted; only a cost row is logged.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

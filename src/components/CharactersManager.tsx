@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { orderToUiChapter, uiChapterToOrder } from "@/lib/chapterNumbering";
 
 interface Project {
@@ -194,12 +195,21 @@ function CharacterCard({
             <p className="text-sm text-neutral-500">{character.role}</p>
           )}
         </div>
-        <button
-          onClick={() => setExpanded((e) => !e)}
-          className="text-sm text-neutral-500 hover:underline"
-        >
-          {expanded ? "Collapse" : "Expand"}
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/characters/${character.id}/chat`}
+            data-testid="chat-link"
+            className="text-sm text-neutral-500 hover:underline"
+          >
+            Chat
+          </Link>
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="text-sm text-neutral-500 hover:underline"
+          >
+            {expanded ? "Collapse" : "Expand"}
+          </button>
+        </div>
       </div>
 
       {expanded && (
