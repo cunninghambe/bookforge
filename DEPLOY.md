@@ -40,6 +40,68 @@ transport). The per-call timeout is `CLAUDE_CODE_TIMEOUT_MS` (default 600000ms).
 absolute path to store the database elsewhere; the parent directory is created
 automatically if missing.
 
+## MCP server (A6)
+
+BookForge exposes an MCP server so an agent (Claude Code, Claude Desktop) can
+manage canon, characters, chapters, drafting, and chat programmatically. It is a
+local stdio process that runs the same repo layer the web app uses:
+
+```
+npm run mcp
+```
+
+Register it with an MCP client via a `.mcp.json` (Claude Code reads one from the
+project root). Point `cwd` at this project so the server finds `.env.local`, the
+database (`DATABASE_PATH`), and the fixture files:
+
+```json
+{
+  "mcpServers": {
+    "bookforge": {
+      "command": "npm",
+      "args": ["run", "mcp"],
+      "cwd": "/absolute/path/to/bookforge"
+    }
+  }
+}
+```
+
+Or invoke tsx directly, without the npm wrapper:
+
+```json
+{
+  "mcpServers": {
+    "bookforge": {
+      "command": "npx",
+      "args": ["tsx", "src/mcp/server.ts"],
+      "cwd": "/absolute/path/to/bookforge"
+    }
+  }
+}
+```
+
+The server reads the same env as the app (`.env.local` is loaded the way the
+llm-smoke script loads it): it honors `DATABASE_PATH`, the model vars, and the
+`USE_FIXTURE_LLM` / `LLM_TRANSPORT` selection (so with no configuration it rides
+the local Claude Code auth, exactly like `npm run dev`).
+
+Trust model. The MCP server is a local stdio child process operating directly on
+the SQLite database file. It deliberately bypasses the web app's password gate:
+anyone who can start this process already has read/write access to the database
+file itself, so the process sits at the same trust boundary as the DB file (and
+the machine it lives on). There is no network listener and no auth layer here by
+design. Do not register this server on a machine whose database you would not
+hand to whoever controls the MCP client.
+
+The human-only approval gates are NOT exposed as tools. No MCP tool approves
+extraction or bible proposals, resolves revision hunks, locks or unlocks a
+chapter, or imports a chapter: those decisions protect quality (the
+diff-enforcement and approval gates the SPEC forbids softening) and stay in the
+web UI. `chapter_update` can edit a chapter's title, pov, synopsis, and beats but
+cannot change its locked status. Every chapter number in tool inputs and outputs
+is 1-based (chapter 1 is a book's first chapter); the server converts to the
+0-based storage at the tool boundary.
+
 ## Backups
 
 ```

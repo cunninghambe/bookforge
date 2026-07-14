@@ -1090,3 +1090,115 @@ returns real text through claude-code with no key; a direct `ClaudeCodeClient.co
 / `stream` drafting-shaped call returns real in-character text and populated usage
 (the same `CompleteResult` the routes log to `llm_calls`); 177 unit + 32 e2e pass on
 fixtures; `tsc` clean.
+
+---
+
+## Amendments A6 and A5.1
+
+Status: COMPLETE. All tests green. Two pieces: A5.1 (small chat corrections found on
+the live drive) and A6 (a local MCP server exposing BookForge to MCP clients).
+
+### A5.1: chat fixes
+
+A5.1a, no narration / no author. `chatSystemPrompt` (`src/lib/chat.ts`) gained an
+explicit "Speaking, all mandatory" block: the character speaks ONLY in the first
+person; no third-person stage directions or narration about itself (the drive
+produced lines like "She pulled the edge of her left glove straighter"); and no
+reference to the author or anyone outside the conversation except through the
+`[MISSING FACT]` marker line. A new `chat.test.ts` case asserts these rules appear in
+the assembled system prompt.
+
+A5.1b, pin validation. `src/lib/chatPin.ts` (new, pure, unit tested) is the single
+place the range is decided: `validatePinChapter(uiChapter, chapterCount)` returns
+`{ valid, min, max, clamped }` and `pinRangeLabel(chapterCount)` renders "1 to N".
+The pin must fall in [1, chapter count of the selected book]; pinning past the last
+chapter is not supported (the last chapter means "end of book so far").
+- `CharacterChat.tsx` clamps the pinned chapter to the selected book's range on
+  submit and shows the valid range (`data-testid="pin-range"`); the chat page now
+  passes a per-book `chapterCount`.
+- The chat route (`src/app/api/characters/[id]/chat/route.ts`) rejects an
+  out-of-range pin with a clear 400 before assembling any context.
+- The MCP `character_chat` tool uses the same helper and surfaces the same error.
+
+Test choice for A5.1b (recorded per the task): unit coverage of the helper
+(`chatPin.test.ts`, 8 tests, including the reported "chapter 13 in a four-chapter
+book" case) plus the route rejection, plus one cheap assertion added to the existing
+`a5.spec.ts` (the valid-range hint is shown for the selected book). This is the
+"unit coverage plus the route check" the task allows, with a no-new-setup e2e line on
+top since it was free.
+
+### A6: MCP server
+
+- New dependency `@modelcontextprotocol/sdk` (1.29.0). Server entry
+  `src/mcp/server.ts`, run via `npm run mcp` (tsx), stdio transport. It loads
+  `.env.local` through `src/lib/loadEnvLocal.ts` (extracted from the llm-smoke
+  script and now shared by both), honors `DATABASE_PATH`, the model vars, and the
+  `USE_FIXTURE_LLM` / `LLM_TRANSPORT` selection, and reuses the `src/lib` repo, chat,
+  assembler, export, sweep, and llm modules directly.
+- Tools registered (`src/mcp/tools.ts`), exactly the SPEC A6 list, all read tools
+  return compact JSON, every chapter number 1-based (stated in each description and
+  converted at the boundary): canon_list, canon_add (status must be explicitly
+  provisional or locked), canon_lock, canon_retire, characters_list, character_get,
+  character_add_state, chapters_list, chapter_get, chapter_create, chapter_update,
+  interrogate_chapter, answer_question, draft_scene, assembled_prompt, character_chat,
+  export_book, sweep_book. Every LLM-calling tool (interrogate_chapter, draft_scene,
+  character_chat, sweep_book) logs to `llm_calls` with its normal purpose. A thrown
+  handler error becomes an MCP tool error carrying the underlying message.
+- THE HARD BOUNDARY: no tool approves extraction or bible proposals, resolves
+  revision hunks, locks or unlocks a chapter, or imports a chapter. Those tools are
+  absent from the surface entirely. `chapter_update` deliberately omits status/summary
+  so it cannot lock a chapter. A comment block in `server.ts` names the boundary and
+  why. Asserted by name in both test files.
+- `DEPLOY.md` gained an MCP section: `.mcp.json` snippets (npm run mcp, or tsx
+  directly) and the trust model (local stdio process, same trust boundary as the DB
+  file, bypasses the web password gate by design).
+
+### Test results
+
+- Unit (vitest): 208 passed (was 177; +31). New: `chatPin.test.ts` (8),
+  `chat.test.ts` +1 (the A5.1a rules), `mcp-tools.test.ts` (13: the tool registry,
+  the forbidden-tool absence, `chapter_update` schema omits status/summary, the
+  1-based/0-based boundary conversions, output shaping, marker extraction, the
+  out-of-range pin rejection, and unknown-id errors, all in-process against an
+  in-memory DB with a stub client), and `mcp-server.test.ts` (9: the SPEC A6
+  acceptance test, which SPAWNS the real server over stdio with USE_FIXTURE_LLM=1 and
+  a scratch DATABASE_PATH under ./data, connects with the MCP SDK client, and asserts
+  the tool list contains the expected tools and NONE of the forbidden ones by name;
+  canon_add then canon_lock round-trips and canon_list shows it locked;
+  character_add_state with a 1-based chapter lands at internal order 0 verified via
+  character_get; draft_scene returns the fixture prose with the [MISSING FACT] marker
+  extracted; character_chat returns the fixture reply and rejects an out-of-range pin;
+  export_book returns Markdown with a locked chapter heading; sweep_book returns the
+  fixture report; and an LLM-calling tool wrote an llm_calls row).
+- E2E (Playwright): 32 passed (unchanged count; the A5.1b pin-range assertion was
+  added inside the existing a5 test). As documented for A3/A5 (D43), a cold
+  `npm run test:e2e` on this sandbox can trip a2's beforeAll warm-up under cold
+  compile (which then leaves cross-spec DB state and cascades); a warm dev server
+  yields a clean 32/32, which is how this was verified. No spec's assertions were
+  weakened.
+- The spawn-based acceptance test worked on the first real attempt (no fallback to
+  in-process-only was needed): spawning `node --import tsx src/mcp/server.ts` avoids
+  the Windows `.cmd` shim problems A7 documented (D64). The in-process handler tests
+  exist alongside it as fast coverage, not as a compromise.
+- `npx tsc --noEmit`: clean.
+
+### Acceptance check (SPEC Amendment A6)
+
+"an automated test drives the server over stdio ... lists tools and confirms the
+human-only actions are absent; canon_add then canon_lock round-trips ...;
+character_add_state with a 1-based chapter lands at the correct internal order;
+draft_scene returns the fixture prose with markers extracted; character_chat returns
+the fixture reply; export_book returns Markdown containing a locked chapter's heading;
+sweep_book over a range returns the fixture report; an LLM-calling tool logs to
+llm_calls." All covered by `mcp-server.test.ts`, spawning the real server.
+
+### Judgment calls (mirrored in DECISIONS.md, D70-D80)
+
+- D70-D72: A5.1a rules and unit assertion; A5.1b single-helper pin validation across
+  client/route/MCP with the test-coverage choice recorded; the deferred CLI-session-
+  resume note.
+- D73-D80: MCP server structure (exported tool defs + spawn acceptance test both under
+  npm test), the node --import tsx spawn, base fixtures instead of a fixtureKey tool
+  param, source "mcp" provenance, interrogate_chapter running the LLM like the route,
+  the hard boundary implementation, the 1-based conversion at the tool boundary, and
+  the extracted shared .env.local loader.

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getCharacter } from "@/lib/repo/characters";
 import { listProjects } from "@/lib/repo/projects";
+import { listChapters } from "@/lib/repo/chapters";
 import { TopNav } from "@/components/TopNav";
 import { CharacterChat } from "@/components/CharacterChat";
 
@@ -18,7 +19,13 @@ export default async function CharacterChatPage({
   const db = getDb();
   const character = getCharacter(db, Number(id));
   if (!character) notFound();
-  const projects = listProjects(db).map((p) => ({ id: p.id, title: p.title }));
+  // chapterCount per book so the pin form can clamp to [1, count] and show the
+  // valid range (A5.1b).
+  const projects = listProjects(db).map((p) => ({
+    id: p.id,
+    title: p.title,
+    chapterCount: listChapters(db, p.id).length,
+  }));
 
   return (
     <main>

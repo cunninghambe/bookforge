@@ -810,6 +810,142 @@ standalone scripts do not get Next's env loading and this repo has no dotenv dep
 through the selected transport, prints the transport, reply, and token/cache usage, and
 exits nonzero with the clear error message on failure. It is not part of `npm test`.
 
+## Amendment A5.1 (2026-07-13): Chat fixes from the live test drive
+
+### D70: The A5.1a rules are an explicit "Speaking" block in the chat system prompt
+
+The pre-A5.1 prompt already said "You speak in the first person" in passing. A5.1a
+requires the three corrections to be explicit and unit-asserted, so `chatSystemPrompt`
+(`src/lib/chat.ts`) gained a dedicated "Speaking, all mandatory" block: first person
+ONLY; no third-person stage directions or narration about oneself (the drive produced
+"She pulled the edge of her left glove straighter"); and no reference to the author or
+anyone outside the conversation except the `[MISSING FACT]` marker line (which is
+explicitly called out as the sole exception). `chat.test.ts` asserts each rule is
+present in the assembled `system` string. The `buildChatRemainder` "Author:" speaker
+labels are the context handed TO the model, not the character speaking, and are
+unchanged; the rule constrains the character's reply.
+
+### D71: Pin validation lives in one pure helper used by client, route, and MCP
+
+A5.1b needs the pinned chapter clamped to [1, chapter count of the selected book] in
+three places. `src/lib/chatPin.ts` (pure, unit tested) is the single source:
+`validatePinChapter(uiChapter, chapterCount)` returns `{ valid, min, max, clamped }`
+and `pinRangeLabel` renders "1 to N". `CharacterChat.tsx` clamps on submit and shows
+the range (the page passes a per-book `chapterCount`); the chat route rejects an
+out-of-range pin with a 400 before building any context; the MCP `character_chat` tool
+throws the same clear error. "Number of chapters in the selected book" is read as the
+book's total chapter count (`listChapters(...).length`), matching the reported "chapter
+13 in a four-chapter book" scenario. A book with no chapters cannot be pinned. The
+conversion to 0-based order still happens once, inside `buildChatContext`, unchanged.
+
+### D72: A5.1b test coverage is unit + route + one free e2e line
+
+The task allowed unit coverage plus the route check when an e2e is not cheap. Chosen:
+`chatPin.test.ts` (8 cases, including the exact reported bug and the inclusive bounds)
+covers the helper; the route and MCP tool both call it and are covered by
+`mcp-server.test.ts`'s out-of-range assertion; and one no-new-setup assertion was added
+to the existing `a5.spec.ts` (the valid-range hint renders for the selected book).
+Adding a full new e2e for the clamp was not worth the cold-compile flakiness this
+sandbox has; the added line rides setup that already exists.
+
+## Amendment A6 (2026-07-13): MCP server
+
+### D73: Tool handlers are exported for in-process tests; the spawn test is the acceptance
+
+`src/mcp/tools.ts` exports `TOOL_DEFS` (each `{ name, description, inputSchema (Zod
+raw shape), handler(ctx, args) }`), `TOOL_NAMES`, and `registerTools(server, ctx)`.
+The handlers are plain functions over an injected `{ db, client, draftModel,
+utilityModel }` context, so they are unit-testable in-process against an in-memory DB
+with a stub client (`mcp-tools.test.ts`), and `registerTools` wraps each on the SDK's
+`McpServer` (turning a thrown error into an MCP tool error carrying the message). The
+SPEC acceptance test (`mcp-server.test.ts`) spawns the real server over stdio. Both run
+under `npm test`. The in-process tests are fast coverage, NOT a fallback: the spawn
+test worked on the first real attempt.
+
+### D74: The spawn test launches node --import tsx directly, not npx/tsx via a shim
+
+To dodge the Windows `.cmd` shim problems A7 documented (D64: modern Node refuses to
+spawn a `.cmd` with `shell:false`, which is what the MCP SDK's `StdioClientTransport`
+uses via cross-spawn), the acceptance test spawns `process.execPath` (node.exe) with
+`["--import", "tsx", "src/mcp/server.ts"]`. That runs the TypeScript server through
+tsx's loader while spawning node directly, so there is no `.cmd` in the chain. It
+connected and drove all tools cleanly, so the SPEC's "fall back to in-process plus one
+spawn smoke assertion" escape hatch was not needed.
+
+### D75: LLM-calling tools take no fixtureKey; base fixtures back the acceptance test
+
+The web routes accept a `fixtureKey` in their body for tests. The MCP tools do NOT
+expose one, to keep the tool surface clean for real agents. Instead the fixture-routed
+LLM tools load their base fixture by purpose, so `tests/fixtures/draft.json`,
+`chat.json`, and `sweep.json` were added (`interrogation.json` already existed) as
+test-only data read only under `USE_FIXTURE_LLM=1`. `draft.json` carries a
+`[MISSING FACT]` line so marker extraction is verifiable; `sweep.json` carries one
+contradiction. This keeps the fixture mechanism unchanged and the tool inputs free of
+test-only parameters.
+
+### D76: MCP-created canon facts and states are sourced "mcp"
+
+`canon_add` and `character_add_state` record `source: "mcp"` for provenance, distinct
+from `seed` / `manual` / `interrogation:<id>` / `extraction:<id>` / `bible` /
+`chat:<id>`. Nothing filters on these two sources (assembly keys on status, unlock
+keys on `extraction:<id>`), so "mcp" is safe and makes agent-created rows visible in
+the DB. `answer_question` keeps the route's `interrogation:<chapterId>` source so its
+plot_decision fact is indistinguishable from the UI's.
+
+### D77: interrogate_chapter runs the interrogation call, mirroring the route
+
+"interrogate_chapter (returns the stored questions)" is read as: run the interrogation
+flow like `POST /api/chapters/[id]/interrogate` (UTILITY_MODEL, store the questions,
+move the chapter to `interrogating`) and return the stored questions, not merely read
+back questions a UI already generated. Otherwise there would be no way to generate
+questions through MCP and `answer_question` would have nothing to answer. It is an
+LLM-calling tool and logs to `llm_calls` with purpose "interrogation".
+
+### D78: The hard boundary is enforced by omission, not by a guard
+
+The human-only gates (approve extraction/bible, resolve revision hunks, lock/unlock a
+chapter, import a chapter) are simply not in `TOOL_DEFS`, so the server never registers
+them and a confused agent cannot invoke one. `chapter_update` patches only title, pov,
+synopsis, and beats; status and summary are absent from its schema, so it cannot lock,
+unlock, or re-summarize a chapter. A comment block in `src/mcp/server.ts` names the
+boundary and its rationale (the SPEC quality bar: never soften the diff-enforcement and
+approval gates). Both `mcp-tools.test.ts` and `mcp-server.test.ts` assert the forbidden
+names are absent (by regex and by exact name) and that the registered set is exactly
+the SPEC A6 list. canon_lock and canon_retire remain, since locking a canon FACT is an
+explicit SPEC tool (not a chapter lock).
+
+### D79: 1-based conversion happens at the tool boundary; beats convert inline
+
+Every chapter number in tool inputs/outputs is 1-based (A2), stated in each tool
+description. Chapter conversions go through `orderToUiChapter` / `uiChapterToOrder`
+(the single chapterNumbering module): `character_add_state`, `chapters_list`,
+`chapter_get`, `chapter_create`, `sweep_book`'s range, and every state timeline row.
+Beat numbers are also 1-based per SPEC A6, but beats are a different axis from chapters
+(a beat index into a chapter's array, not a stored `order_index`), so `draft_scene` and
+`assembled_prompt` convert beat number to 0-based index with an inline `n - 1` and a
+comment, rather than routing an unrelated axis through the chapter helper.
+
+### D80: The .env.local loader is extracted and shared
+
+The minimal `.env.local` parser was lifted out of `scripts/llm-smoke.mjs` into
+`src/lib/loadEnvLocal.ts` (same logic: sets only keys absent from `process.env`, strips
+matching quotes, no interpolation) and is now imported by both the llm-smoke script and
+`src/mcp/server.ts`, so the two standalone entry points parse `.env.local` identically,
+satisfying the SPEC A6 "loads .env.local the way llm-smoke does" requirement by genuine
+reuse rather than a second copy.
+
+## Deferred feature idea (recorded, not built)
+
+### CLI session reuse for chat caching (from A5.1)
+
+SPEC A5.1 defers: per-conversation reuse of the `claude` binary's resume capability so
+chat turns on the claude-code transport hit the provider cache. The live drive measured
+cache writes every turn but zero reads across one-shot spawns (each turn is a fresh
+`claude` process, so the provider cache from the prior turn is never read). Revisit if
+chat becomes heavy. Not built: it would require the claude-code transport to hold and
+resume a session id per conversation, which the current per-call spawn model does not
+do, and it is out of A5.1 scope.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

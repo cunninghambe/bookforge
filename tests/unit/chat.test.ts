@@ -151,6 +151,27 @@ describe("buildChatContext", () => {
     expect(ctx.contextPrefix).toContain("never says the thing directly");
   });
 
+  it("forbids narration, third-person stage directions, and outside references (A5.1a)", () => {
+    const { db, mara } = scenario();
+    const ctx = buildChatContext(db, {
+      characterId: mara.id,
+      projectId: 1,
+      uiChapter: 3,
+    });
+    const sys = ctx.system;
+    // First person only.
+    expect(sys).toContain("first person");
+    expect(sys.toLowerCase()).toContain("only in the first person");
+    // No third-person stage directions / narration about oneself.
+    expect(sys.toLowerCase()).toContain("third-person stage directions");
+    expect(sys.toLowerCase()).toContain("narrated");
+    // No reference to the author or anyone outside the conversation, except via
+    // the [MISSING FACT] marker line.
+    expect(sys.toLowerCase()).toContain("do not address");
+    expect(sys).toContain("author");
+    expect(sys).toContain("[MISSING FACT]");
+  });
+
   it("assembles a prompt free of em-dashes", () => {
     const { db, mara } = scenario();
     const ctx = buildChatContext(db, {

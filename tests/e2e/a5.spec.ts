@@ -83,6 +83,8 @@ test.describe("Amendment A5: character chatbots", () => {
 
     // Pin book 1, chapter 3.
     await page.getByTestId("chat-book").selectOption("1");
+    // A5.1b: the valid pin range is shown for the selected book.
+    await expect(page.getByTestId("pin-range")).toContainText("1 to");
     await page.getByTestId("chat-chapter").fill("3");
     await page.getByTestId("set-pin-button").click();
 

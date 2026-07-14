@@ -2,12 +2,14 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { validatePinChapter, pinRangeLabel } from "@/lib/chatPin";
 
 const CONTROL_DELIM = "\n<<<BOOKFORGE_CTRL>>>\n";
 
 interface Project {
   id: number;
   title: string;
+  chapterCount: number;
 }
 
 interface ControlFrame {
@@ -67,13 +69,27 @@ export function CharacterChat({
 
   const pinBusyRef = useRef(false);
 
+  // The chapter count of the currently selected book, for clamping and the range
+  // hint (A5.1b). The pin form can never accept a chapter past the last one.
+  const selectedChapterCount = useMemo(() => {
+    const p = projects.find((x) => String(x.id) === formProject);
+    return p ? p.chapterCount : 0;
+  }, [projects, formProject]);
+
   function setMoment(e: React.FormEvent) {
     e.preventDefault();
     const projectId = Number(formProject);
-    const uiChapter = Number(formChapter);
-    if (!Number.isFinite(projectId) || !Number.isFinite(uiChapter) || uiChapter < 1) {
+    const rawChapter = Number(formChapter);
+    if (!Number.isFinite(projectId) || !Number.isFinite(rawChapter)) {
       return;
     }
+    // Clamp the pinned chapter to [1, chapter count of the selected book] (A5.1b):
+    // pinning past the last chapter is not supported. A book with no chapters
+    // cannot be pinned.
+    const check = validatePinChapter(rawChapter, selectedChapterCount);
+    if (check.max < 1) return;
+    const uiChapter = check.clamped;
+    setFormChapter(String(uiChapter));
     // Changing the pin starts a fresh conversation: state boundaries differ, so a
     // transcript from another moment would leak (SPEC A5).
     setTurns([]);
@@ -203,10 +219,17 @@ export function CharacterChat({
                 data-testid="chat-chapter"
                 type="number"
                 min={1}
+                max={selectedChapterCount > 0 ? selectedChapterCount : undefined}
                 value={formChapter}
                 onChange={(e) => setFormChapter(e.target.value)}
                 className="w-24 rounded border border-neutral-300 px-2 py-1 text-sm normal-case tracking-normal text-neutral-900"
               />
+              <span
+                data-testid="pin-range"
+                className="text-xs normal-case tracking-normal text-neutral-400"
+              >
+                Valid chapters: {pinRangeLabel(selectedChapterCount)}
+              </span>
             </label>
             <button
               type="submit"

@@ -6,32 +6,11 @@
 //
 // A7. See DECISIONS D63-D69.
 
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { getLlmClient } from "../src/lib/llm/client";
+import { loadEnvLocal } from "../src/lib/loadEnvLocal";
 
-// Minimal .env.local loader: standalone scripts do not get Next's env loading,
-// and this repo has no dotenv dependency (see backup.mjs precedent). Only sets
-// keys that are not already present in process.env. Not a full dotenv parser.
-function loadEnvLocal() {
-  const path = resolve(process.cwd(), ".env.local");
-  if (!existsSync(path)) return;
-  for (const raw of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const eq = line.indexOf("=");
-    if (eq < 0) continue;
-    const key = line.slice(0, eq).trim();
-    let value = line.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
+// The minimal .env.local loader lives in src/lib/loadEnvLocal.ts and is shared
+// with the MCP server (A6), so both entry points parse .env.local identically.
 
 function selectedTransportName() {
   if (process.env.USE_FIXTURE_LLM === "1") return "fixture";

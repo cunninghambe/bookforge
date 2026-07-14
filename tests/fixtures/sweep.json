@@ -1,0 +1,5 @@
+{
+  "text": "[\n  { \"chapter\": 1, \"quote\": \"the twin moons hung over the ridge\", \"conflicting_fact\": \"The world has a single moon.\", \"severity\": \"high\" }\n]",
+  "inputTokens": 500,
+  "outputTokens": 40
+}

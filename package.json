@@ -14,11 +14,13 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "backup": "node scripts/backup.mjs",
+    "mcp": "tsx src/mcp/server.ts",
     "llm-smoke": "tsx scripts/llm-smoke.mjs",
     "pretest:e2e": "node scripts/clean-test-db.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^11.8.1",
     "diff": "^7.0.0",
     "drizzle-orm": "^0.38.3",

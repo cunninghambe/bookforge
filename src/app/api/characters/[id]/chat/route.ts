@@ -1,10 +1,12 @@
 import { getDb } from "@/lib/db";
 import { getCharacter } from "@/lib/repo/characters";
+import { listChapters } from "@/lib/repo/chapters";
 import { logLlmCall } from "@/lib/repo/llm";
 import { getLlmClient, type CompleteResult } from "@/lib/llm/client";
 import { hasEmDash } from "@/lib/llm/lint";
 import { CONTROL_DELIM, extractMarkers } from "@/lib/llm/markers";
 import { buildChatContext, buildChatRemainder, type ChatTurn } from "@/lib/chat";
+import { validatePinChapter, pinRangeLabel } from "@/lib/chatPin";
 
 // Character chatbot turn (Amendment A5). Body: { projectId, uiChapter, history,
 // message, fixtureKey? }. The character context is the cacheable prompt prefix
@@ -59,6 +61,20 @@ export async function POST(
     return new Response(JSON.stringify({ error: "message required" }), {
       status: 400,
     });
+  }
+
+  // A5.1b: reject a pin outside [1, chapter count of the selected book] with a
+  // clear message rather than assembling a context for a chapter that does not
+  // exist.
+  const chapterCount = listChapters(db, projectId).length;
+  const pinCheck = validatePinChapter(uiChapter, chapterCount);
+  if (!pinCheck.valid) {
+    return new Response(
+      JSON.stringify({
+        error: `pinned chapter ${uiChapter} is out of range; valid chapters are ${pinRangeLabel(chapterCount)}`,
+      }),
+      { status: 400 },
+    );
   }
 
   const context = buildChatContext(db, {
