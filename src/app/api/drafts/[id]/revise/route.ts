@@ -7,13 +7,30 @@ import { createRevision } from "@/lib/repo/revisions";
 import { logLlmCall } from "@/lib/repo/llm";
 import { getLlmClient, type CompleteResult } from "@/lib/llm/client";
 import { hasEmDash } from "@/lib/llm/lint";
-import { revisionSystemPrompt } from "@/lib/llm/prompts";
+import {
+  revisionSystemPrompt,
+  patchRevisionSystemPrompt,
+} from "@/lib/llm/prompts";
 import { CONTROL_DELIM, extractConsistencyFixes } from "@/lib/llm/markers";
 import { analyzeRevision, type FlaggedSpan } from "@/lib/revision/diff";
+import {
+  parsePatchEnvelope,
+  applyPatches,
+  replacementsHaveEmDash,
+  shouldUseFullMode,
+  type FailedPatch,
+} from "@/lib/revision/patch";
 
-// Streams a revised chapter, then returns diff analysis in a trailing control
-// frame (same protocol as the draft route). The revision is persisted as pending;
-// the client resolves any unauthorized hunks via /api/revisions/[id]/resolve.
+// A4.2. Patch mode is the default: the model returns a JSON envelope of
+// verbatim-anchored patches, which we apply mechanically to produce the revised
+// full text. That full text then flows through the UNMODIFIED analyzeRevision +
+// revisions-table + resolve enforcement path, exactly as full mode does. The
+// route falls back to full-text mode when flagged spans cover more than 40% of the
+// chapter (decided before calling) or when the patch JSON fails to parse after one
+// patch-mode retry. Full mode keeps the old streaming, em-dash-linted behavior.
+// The client buffers the whole stream and reads the trailing control frame, so
+// patch mode's non-streaming complete() and full mode's streaming both end the
+// same way: prose (if any) then CONTROL_DELIM + JSON.
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const db = getDb();
   const { id } = await ctx.params;
@@ -51,12 +68,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     projectId: chapter.projectId,
     types: ["style_rule"],
   }).map((f) => f.content);
-  const system = revisionSystemPrompt(styleRules);
-  const prompt = buildRevisionPrompt(oldText, flaggedSpans);
+
+  // A4.1: system + chapter text is the cacheable prefix; the flagged spans and
+  // task are the variable remainder, so a retry (em-dash or JSON) reads the cache.
+  const chapterPrefix = `## CHAPTER TEXT\n${oldText}\n\n`;
+  const remainder = buildRevisionRemainder(flaggedSpans);
+  const patchRemainder = buildPatchRemainder(flaggedSpans);
 
   const client = getLlmClient();
   const model = process.env.DRAFT_MODEL ?? "claude-sonnet-4-6";
   const encoder = new TextEncoder();
+
+  // >40% coverage: skip patches, go straight to full mode (computed before any call).
+  const startFull = shouldUseFullMode(oldText, flaggedSpans);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -70,45 +94,140 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         }
       };
 
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let cacheReadTokens = 0;
+      let cacheWriteTokens = 0;
+      const accumulate = (r: CompleteResult) => {
+        inputTokens += r.inputTokens;
+        outputTokens += r.outputTokens;
+        cacheReadTokens += r.cacheReadTokens ?? 0;
+        cacheWriteTokens += r.cacheWriteTokens ?? 0;
+      };
+
       try {
-        const r1 = await pump(
-          client.stream({
+        let mode: "patch" | "full" = startFull ? "full" : "patch";
+        let retried = false;
+        let emDashUnresolved = false;
+        let newText = "";
+        let declaredFixes: string[] = [];
+        let failedPatches: FailedPatch[] = [];
+
+        if (mode === "patch") {
+          const patchSystem = patchRevisionSystemPrompt(styleRules);
+          const a1 = await client.complete({
             purpose: "revision",
             model,
-            system,
-            prompt,
-            maxTokens: 8192,
+            system: patchSystem,
+            promptPrefix: chapterPrefix,
+            prompt: patchRemainder,
+            maxTokens: 4096,
             fixtureKey,
-          }),
-        );
-        let rawText = r1.text;
-        let inputTokens = r1.inputTokens;
-        let outputTokens = r1.outputTokens;
-        let retried = false;
+          });
+          accumulate(a1);
+          let parsed = parsePatchEnvelope(a1.text);
 
-        // Em-dash lint: hard reject, auto-retry once (same as drafting).
-        if (hasEmDash(rawText)) {
-          retried = true;
-          controller.enqueue(
-            encoder.encode(
-              "\n\n[em-dash detected in the revision, regenerating without it]\n\n",
-            ),
-          );
-          const r2 = await pump(
+          if (!parsed.ok) {
+            // One patch-mode retry. Same fixtureKey: a full-text response
+            // deterministically fails to parse again in tests, so we fall through
+            // to full mode without needing a separate retry fixture (D53).
+            const a2 = await client.complete({
+              purpose: "revision",
+              model,
+              system: patchSystem,
+              promptPrefix: chapterPrefix,
+              prompt:
+                patchRemainder +
+                "\n\nIMPORTANT: your previous reply was not valid JSON in the required shape. Return ONLY the JSON object with \"patches\" and \"consistency_fixes\". No prose outside the JSON.",
+              maxTokens: 4096,
+              fixtureKey,
+            });
+            accumulate(a2);
+            parsed = parsePatchEnvelope(a2.text);
+          }
+
+          if (parsed.ok) {
+            let env = parsed.envelope;
+            // Em-dash lint on replacements: reject and retry once in patch mode.
+            if (replacementsHaveEmDash(env.patches, env.consistencyFixes)) {
+              retried = true;
+              const a3 = await client.complete({
+                purpose: "revision",
+                model,
+                system: patchSystem,
+                promptPrefix: chapterPrefix,
+                prompt:
+                  patchRemainder +
+                  "\n\nIMPORTANT: a replacement used an em-dash, which is forbidden. Return the JSON again with commas, colons, full stops, or restructured sentences. No em-dashes in any replacement.",
+                maxTokens: 4096,
+                fixtureKey: fixtureKey ? `${fixtureKey}.retry` : undefined,
+              });
+              accumulate(a3);
+              const reparsed = parsePatchEnvelope(a3.text);
+              if (reparsed.ok) env = reparsed.envelope;
+              // Still dirty after the retry: warn via the existing mechanism.
+              if (replacementsHaveEmDash(env.patches, env.consistencyFixes)) {
+                emDashUnresolved = true;
+              }
+            }
+            const applied = applyPatches(
+              oldText,
+              env.patches,
+              env.consistencyFixes,
+            );
+            newText = applied.newText;
+            declaredFixes = applied.declaredJustifications;
+            failedPatches = applied.failedPatches;
+          } else {
+            // Patch JSON failed to parse after one retry: fall back to full mode.
+            mode = "full";
+          }
+        }
+
+        if (mode === "full") {
+          const system = revisionSystemPrompt(styleRules);
+          const r1 = await pump(
             client.stream({
               purpose: "revision",
               model,
               system,
-              prompt:
-                prompt +
-                "\n\nIMPORTANT: your previous attempt used an em-dash, which is forbidden. Rewrite using commas, colons, full stops, or restructured sentences. No em-dashes.",
+              promptPrefix: chapterPrefix,
+              prompt: remainder,
               maxTokens: 8192,
-              fixtureKey: fixtureKey ? `${fixtureKey}.retry` : undefined,
+              fixtureKey,
             }),
           );
-          rawText = r2.text;
-          inputTokens += r2.inputTokens;
-          outputTokens += r2.outputTokens;
+          accumulate(r1);
+          let rawText = r1.text;
+
+          if (hasEmDash(rawText)) {
+            retried = true;
+            controller.enqueue(
+              encoder.encode(
+                "\n\n[em-dash detected in the revision, regenerating without it]\n\n",
+              ),
+            );
+            const r2 = await pump(
+              client.stream({
+                purpose: "revision",
+                model,
+                system,
+                promptPrefix: chapterPrefix,
+                prompt:
+                  remainder +
+                  "\n\nIMPORTANT: your previous attempt used an em-dash, which is forbidden. Rewrite using commas, colons, full stops, or restructured sentences. No em-dashes.",
+                maxTokens: 8192,
+                fixtureKey: fixtureKey ? `${fixtureKey}.retry` : undefined,
+              }),
+            );
+            accumulate(r2);
+            rawText = r2.text;
+          }
+
+          const { clean, fixes } = extractConsistencyFixes(rawText);
+          newText = clean;
+          declaredFixes = fixes;
+          emDashUnresolved = hasEmDash(newText);
         }
 
         logLlmCall(db, {
@@ -116,15 +235,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           chapterId: chapter.id,
           inputTokens,
           outputTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
         });
-
-        const { clean: newText, fixes } = extractConsistencyFixes(rawText);
-        // Second-pass safety: never hand back a silent em-dash violation.
-        const emDashUnresolved = hasEmDash(newText);
 
         const analysis = analyzeRevision(oldText, newText, {
           flaggedSpans,
-          consistencyFixes: fixes,
+          consistencyFixes: declaredFixes,
         });
 
         const revision = createRevision(db, {
@@ -133,14 +250,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           oldText,
           newText,
           flaggedSpans,
-          consistencyFixes: fixes,
+          consistencyFixes: declaredFixes,
         });
 
         const control = {
           revisionId: revision.id,
+          mode,
           hunks: analysis.hunks,
           unauthorizedCount: analysis.unauthorizedCount,
-          consistencyFixes: fixes,
+          consistencyFixes: declaredFixes,
+          failedPatches,
           retried,
           emDashUnresolved,
         };
@@ -167,10 +286,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   });
 }
 
-// The revision user prompt: full chapter text plus the flagged spans with their
-// comments. The system prompt already carries the REVISION_PROMPT contract.
-function buildRevisionPrompt(oldText: string, spans: FlaggedSpan[]): string {
-  const flagged = spans.length
+// Renders the flagged spans with their comments. Shared by both modes.
+function renderFlaggedSpans(spans: FlaggedSpan[]): string {
+  return spans.length
     ? spans
         .map(
           (s, i) =>
@@ -178,12 +296,23 @@ function buildRevisionPrompt(oldText: string, spans: FlaggedSpan[]): string {
         )
         .join("\n")
     : "(no spans flagged)";
-  return `## CHAPTER TEXT
-${oldText}
+}
 
-## FLAGGED SPANS
-${flagged}
+// Full-mode remainder: flagged spans plus the full-text task. The chapter text is
+// the cached prefix, so it is not repeated here.
+function buildRevisionRemainder(spans: FlaggedSpan[]): string {
+  return `## FLAGGED SPANS
+${renderFlaggedSpans(spans)}
 
 ## TASK
 Revise only the flagged spans per your contract. Return the complete revised chapter text. Do not use em-dashes.`;
+}
+
+// Patch-mode remainder: flagged spans plus the patch-envelope task.
+function buildPatchRemainder(spans: FlaggedSpan[]): string {
+  return `## FLAGGED SPANS
+${renderFlaggedSpans(spans)}
+
+## TASK
+Revise only the flagged spans per your contract. Return the JSON envelope of patches and consistency_fixes described in the system prompt. Copy each "original" verbatim from the chapter text. Do not use em-dashes.`;
 }

@@ -119,6 +119,19 @@ export function migrate(sqlite: Database.Database): void {
     // lock-time proposals carry 'extraction:<chapter_id>' (Amendment A1).
     definition: "TEXT DEFAULT 'manual'",
   });
+
+  // Amendment A4.1: prompt-cache usage columns on llm_calls. Nullable; populated
+  // only when the provider reports cache read/write token counts.
+  addColumnIfMissing(sqlite, {
+    table: "llm_calls",
+    column: "cache_read_tokens",
+    definition: "INTEGER",
+  });
+  addColumnIfMissing(sqlite, {
+    table: "llm_calls",
+    column: "cache_write_tokens",
+    definition: "INTEGER",
+  });
 }
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no ADD COLUMN IF NOT EXISTS, so

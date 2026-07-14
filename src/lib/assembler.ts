@@ -40,10 +40,21 @@ export interface AssembledBlock {
 export interface AssembledPrompt {
   system: string;
   prompt: string;
+  // A4.1 cache split. CANON / CHARACTERS / STORY SO FAR / PREVIOUS CHAPTER are
+  // stable across the calls for a chapter (and reused when drafting scene by
+  // scene); CURRENT CHAPTER / TASK vary per call. stablePrefix carries the
+  // trailing separator so that `stablePrefix + variableRemainder === prompt`
+  // exactly, letting the draft route pass promptPrefix without altering the
+  // bytes the model sees.
+  stablePrefix: string;
+  variableRemainder: string;
   blocks: AssembledBlock[];
   warnings: string[];
   appearingCharacters: string[];
 }
+
+// The first four blocks are the stable, cacheable prefix; the last two vary.
+const STABLE_BLOCK_COUNT = 4;
 
 function words(s: string): string[] {
   return s.trim().length === 0 ? [] : s.trim().split(/\s+/);
@@ -131,11 +142,26 @@ export function assemblePrompt(db: Db, input: AssembleInput): AssembledPrompt {
     { name: "TASK", content: taskBlock },
   ];
 
-  const prompt = blocks
-    .map((b) => `## ${b.name}\n${b.content}`)
-    .join("\n\n");
+  const render = (bs: AssembledBlock[]) =>
+    bs.map((b) => `## ${b.name}\n${b.content}`).join("\n\n");
+  const stableBlocks = blocks.slice(0, STABLE_BLOCK_COUNT);
+  const variableBlocks = blocks.slice(STABLE_BLOCK_COUNT);
+  const stableBody = render(stableBlocks);
+  const variableRemainder = render(variableBlocks);
+  // Prefix carries the "\n\n" that joined the two halves, so prefix + remainder
+  // reconstitutes the whole prompt with no lost separator.
+  const stablePrefix = `${stableBody}\n\n`;
+  const prompt = `${stablePrefix}${variableRemainder}`;
 
-  return { system, prompt, blocks, warnings, appearingCharacters: appearingNames };
+  return {
+    system,
+    prompt,
+    stablePrefix,
+    variableRemainder,
+    blocks,
+    warnings,
+    appearingCharacters: appearingNames,
+  };
 }
 
 function buildCanonBlock(

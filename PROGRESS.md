@@ -786,3 +786,108 @@ machine the cold run passes as before. a2.spec was not modified (out of A3 scope
   focus mid-navigation; `ImportPanel` left untouched.
 - D49: The A3 e2e approves a world rule, a character, and a state (not the style
   note), so it does not collide with Phase 1's exact count of five locked style rules.
+
+---
+
+## Amendment A4: Token efficiency, without losing quality
+
+Status: COMPLETE. All tests green. Two changes: A4.1 prompt caching across the
+draft, sweep, and revision call paths; A4.2 patch-mode revision (default) with an
+automatic fallback to the old full-text mode. The Phase 4 diff-enforcement path is
+unchanged: patch mode produces a revised full text mechanically, then the existing
+analyzeRevision + revisions-table + resolve flow runs exactly as before.
+
+### What was built
+
+A4.1, prompt caching.
+
+- `src/lib/llm/client.ts`: `CompleteOptions` gains `promptPrefix`; `CompleteResult`
+  gains `cacheReadTokens` / `cacheWriteTokens`. `buildMessageRequest` is a pure,
+  exported, unit-tested function that builds the cacheable block shape (system and
+  prefix as `cache_control: {type:"ephemeral"}` text blocks, remainder uncached; no
+  prefix returns the old plain-string shape). The real `AnthropicClient` (both
+  `complete` and `stream`) sends those blocks and reads cache usage; the
+  `FixtureClient` accepts `promptPrefix`, ignores it, and passes through any cache
+  fields present in a fixture. The SDK-type bridge (0.32.1 types prompt caching only
+  on the beta endpoint) is a narrow cast at the call site (D50).
+- `src/lib/db/schema.ts` + `migrate.ts`: `llm_calls` gains nullable
+  `cache_read_tokens` / `cache_write_tokens` via the guarded `addColumnIfMissing`
+  pattern. `src/lib/repo/llm.ts`: `logLlmCall` passes them through (null, not zero,
+  when absent); new `recentLlmCalls` readback helper.
+- `src/lib/assembler.ts`: exposes `stablePrefix` (CANON / CHARACTERS / STORY SO FAR /
+  PREVIOUS CHAPTER, with the trailing separator) and `variableRemainder` (CURRENT
+  CHAPTER / TASK), with `stablePrefix + variableRemainder === prompt` (D51). The draft
+  route passes the prefix so scene-by-scene calls and the em-dash retry hit the cache.
+- `src/lib/llm/prompts.ts`: the sweep prompt is split into `sweepPrefix(lockedCanon)`
+  (canon first, the shared cacheable prefix) and `sweepChapterPrompt` (per-chapter
+  remainder); `runSweep` passes the prefix so chapters 2..N read the cache.
+- Revision (`src/app/api/drafts/[id]/revise/route.ts`): the cache prefix is the system
+  prompt plus the chapter text, so the em-dash and patch-JSON retries reuse it (D52).
+
+A4.2, patch-mode revision.
+
+- `src/lib/revision/patch.ts` (new, pure, unit tested): `parsePatchEnvelope`
+  (defensive, via `parseJson`; a full-text prose response fails to parse, which is the
+  fallback signal), `applyPatches` (anchors each `original` with the shared `findSpan`,
+  applies non-overlapping anchors offset-safely and order-independently, collects
+  absent/overlapping anchors as failed patches while the rest apply, returns the
+  applied consistency-fix justifications), `replacementsHaveEmDash`, and
+  `flaggedCoverage` / `shouldUseFullMode` (the >40% pre-call fallback decision).
+- `src/lib/llm/prompts.ts`: `patchRevisionSystemPrompt` demands the
+  `{patches, consistency_fixes}` envelope with verbatim originals extended to whole
+  sentences.
+- The revise route now defaults to patch mode: parse the envelope (one same-key retry),
+  em-dash-lint replacements (one `.retry`, then warn via `emDashUnresolved`), apply
+  patches to get the full text, feed the applied justifications as the declared entries
+  to the UNMODIFIED `analyzeRevision`, persist via the existing `createRevision`, and
+  emit a control frame carrying `mode` and `failedPatches`. It falls back to a
+  full-text-contract call (the OLD streaming, em-dash-linted path) on >40% coverage or
+  an unparseable envelope (D53, D55). Patch mode uses `complete()`; full mode keeps
+  streaming; the client buffers either way (D54).
+- `src/components/ReviewEditor.tsx`: shows an in-progress note while revising, the mode
+  that ran (`data-testid="revision-mode"`), and a failed-patches panel
+  (`data-testid="failed-patches"`). The unauthorized panel, accept/reject, and save
+  flow are visually and behaviorally unchanged.
+- `src/app/api/dev/llm-calls/route.ts` (new, dev-only): reads back logged `llm_calls`
+  rows so the e2e can assert the patch revision's small output-token count (D57).
+- Fixture `revision.a4patch.json`: an in-span patch, a declared consistency-fix patch,
+  and an undeclared out-of-span patch; applying it yields exactly the Phase 4 texts.
+
+### Test results
+
+- Unit (vitest): 150 passed (was 128; +22). New: `client-cache.test.ts` (4:
+  block construction with/without a prefix, cache_control placement),
+  `revision-patch.test.ts` (15: envelope parse valid/fenced/full-text/garbage, patch
+  application order-independence, failed-anchor and overlap collection, applied-fix
+  justifications, replacement em-dash detection, coverage/full-mode decision including
+  overlap merging, and the load-bearing case that a patch-produced newText through the
+  UNMODIFIED analyzeRevision classifies exactly as Phase 4: in-span authorized,
+  declared fix passes, undeclared patch unauthorized), and `migrate-cache-columns.test.ts`
+  (3: idempotent add, pre-A4 upgrade, log-and-readback of cache tokens including
+  null-not-zero for a no-cache call).
+- E2E (Playwright): 30 passed (was 28; +2 in `a4.spec.ts`): the SPEC acceptance check,
+  re-running the Phase 4 scenario in patch mode with the patch fixture. The unauthorized
+  panel catches ONLY the undeclared out-of-span patch (the in-span patch and the
+  declared consistency fix are kept silently, authorized-summary shows 2, no failed
+  patches); the mode is reported as "patch revision"; the logged revision outputTokens
+  is asserted (via `/api/dev/llm-calls`) to be a small fraction of the chapter size;
+  rejecting the undeclared patch yields the exact expected final text and a mid-paragraph
+  patch reads cleanly at both seams (no doubled spaces, punctuation intact, no em-dash).
+  All 28 prior e2e tests pass unchanged, including the Phase 4 full-text-mode tests
+  (they exercise full mode via the D53 fallback).
+- `tsc --noEmit`: clean.
+
+### How the existing Phase 4 tests keep exercising full-text mode
+
+`phase4.spec.ts` and the Phase 4 em-dash test drive `?fx=phase4` / `?fx=emdashrev`,
+whose fixtures are full-text revisions. In patch mode those parse as "not a patch
+envelope"; the one patch-mode parse retry reuses the same fixtureKey, so it fails
+again, and the route falls back to a full-text-contract call on the same base key,
+running the OLD full-text path byte-for-byte (D53). No existing spec, fixture, or
+assertion was changed.
+
+### Judgment calls
+
+Recorded in DECISIONS.md as D50-D57. Every A4 ambiguity (SDK type bridge, prefix
+byte-identity, the mode-selection and fallback design that preserves the Phase 4 path,
+the em-dash-on-replacements lint, and the dev readback route) is captured there.

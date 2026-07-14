@@ -1,0 +1,5 @@
+{
+  "text": "{\"patches\":[{\"original\":\"counting each one under her breath\",\"replacement\":\"taking them two at a time\"},{\"original\":\"The city below was quiet, the way it always went quiet before the tithe bells.\",\"replacement\":\"The city below was dark, the way it always went dark before the tithe bells.\"}],\"consistency_fixes\":[{\"original\":\"Kesh had left a lantern burning by the door\",\"replacement\":\"Kessa had left a lantern burning by the door\",\"justification\":\"Renamed Kesh to Kessa for consistency with the flagged correction.\"}]}",
+  "inputTokens": 950,
+  "outputTokens": 48
+}

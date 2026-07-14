@@ -132,5 +132,9 @@ export const llmCalls = sqliteTable("llm_calls", {
   chapterId: integer("chapter_id"),
   inputTokens: integer("input_tokens"),
   outputTokens: integer("output_tokens"),
+  // A4.1: prompt-cache usage per call, when the provider reports it. Added via a
+  // guarded ALTER TABLE in migrate.ts so existing databases upgrade idempotently.
+  cacheReadTokens: integer("cache_read_tokens"),
+  cacheWriteTokens: integer("cache_write_tokens"),
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 });

@@ -72,6 +72,35 @@ ${rules}
 Return the complete revised chapter text.`;
 }
 
+// Patch-mode revision (A4.2). Same contract as revisionSystemPrompt, but the model
+// returns a JSON envelope of verbatim-anchored patches instead of the whole
+// rewritten chapter, so a revision costs output tokens proportional to the change.
+// The enforcement discipline is unchanged: a patch touching an unflagged span that
+// is not a declared consistency fix will be caught as an unauthorized change.
+export function patchRevisionSystemPrompt(styleRules: string[]): string {
+  const rules = styleRules.length
+    ? styleRules.map((r) => `- ${r}`).join("\n")
+    : "- (no style rules locked yet)";
+  return `You are revising a chapter draft. The author has flagged specific spans with comments. Return your edits as patches, not a rewritten chapter. Your contract:
+- Change ONLY the flagged spans, plus the minimum surrounding text needed for grammatical continuity. Put those changes in "patches".
+- Each patch's "original" must be copied VERBATIM from the chapter text (exact characters, including punctuation and spacing) and extended outward to whole sentence boundaries so it anchors cleanly. "replacement" is the new text for that span.
+- If a flagged change forces a consistency fix elsewhere in the chapter (a name, a repeated detail), put it in "consistency_fixes" with a one-line "justification". Do NOT put out-of-span fixes in "patches".
+- Do not restyle, tighten, or improve unflagged text. Resist the urge.
+- All style rules still apply to every replacement:
+${rules}
+
+Return ONLY a JSON object with this exact shape, and nothing else:
+{
+  "patches": [
+    { "original": "verbatim span from the chapter, whole sentences", "replacement": "the revised text" }
+  ],
+  "consistency_fixes": [
+    { "original": "verbatim span from the chapter", "replacement": "the revised text", "justification": "one line explaining why this out-of-span change is required" }
+  ]
+}
+Use an empty array where there is nothing to change. Do not use em-dashes anywhere. No prose outside the JSON.`;
+}
+
 // Summary generated at lock time. UTILITY_MODEL, ~150 words, factual, present
 // tense, includes canon-relevant developments. Returns plain prose, not JSON.
 export function summaryPrompt(args: {
@@ -138,25 +167,29 @@ Return ONLY a JSON object with this exact shape, and nothing else:
 Use an empty array for facts or states if there are none. Do not use em-dashes anywhere. No prose outside the JSON.`;
 }
 
-// Consistency sweep for one locked chapter. Sends the chapter text plus the full
-// locked canon and asks for contradictions ONLY, as a JSON array.
-export function sweepPrompt(args: {
-  chapterNumber: number;
-  chapterTitle: string;
-  text: string;
-  lockedCanon: string[];
-}): string {
-  const canon = args.lockedCanon.length
-    ? args.lockedCanon.map((c, i) => `[${i + 1}] ${c}`).join("\n")
+// Consistency sweep for one locked chapter. A4.1 splits the prompt so the locked
+// canon (identical for every chapter in a run) is a cacheable shared prefix and
+// only the per-chapter text is the variable remainder. sweepPrefix builds the
+// prefix once; sweepChapterPrompt builds each chapter's remainder. runSweep sends
+// the prefix as promptPrefix so chapters 2..N read from the cache.
+export function sweepPrefix(lockedCanon: string[]): string {
+  const canon = lockedCanon.length
+    ? lockedCanon.map((c, i) => `[${i + 1}] ${c}`).join("\n")
     : "(none)";
   return `You are running an adversarial consistency sweep on one chapter of a novel. Compare the chapter text against the locked canon and report ONLY contradictions: places where the text states or implies something that conflicts with a locked fact. Do not report style, quality, or missing detail. If there are no contradictions, return an empty array.
 
-CHAPTER ${args.chapterNumber}: ${args.chapterTitle}
+LOCKED CANON
+${canon}`;
+}
+
+export function sweepChapterPrompt(args: {
+  chapterNumber: number;
+  chapterTitle: string;
+  text: string;
+}): string {
+  return `CHAPTER ${args.chapterNumber}: ${args.chapterTitle}
 TEXT
 ${args.text}
-
-LOCKED CANON
-${canon}
 
 Return ONLY a JSON array with this exact shape, and nothing else:
 [

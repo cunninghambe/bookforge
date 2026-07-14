@@ -565,6 +565,108 @@ the character, and the state, and leaves both the second world rule and the styl
 note rejected (both asserted absent). This is a test-design choice to avoid coupling
 to another phase's fixed count, not a narrowing of the A3 gate.
 
+## Amendment A4 (2026-07-13): Token efficiency without losing quality
+
+### D50: Cacheable blocks built in a pure function; the SDK types are bridged with a cast
+
+A4.1 needs `cache_control` on the system and prefix content blocks and needs the
+`cache_creation_input_tokens` / `cache_read_input_tokens` usage fields. The installed
+`@anthropic-ai/sdk` (0.32.1) types these only on the beta endpoint, not on the
+non-beta `messages.create` / `messages.stream` this app uses; prompt caching is GA at
+the API level, so the fields are runtime-valid on the standard endpoint. Rather than
+switch the whole app to the beta namespace, `buildMessageRequest`
+(`src/lib/llm/client.ts`) is a pure, exported, unit-tested function that builds the
+block shape (system and prefix as `{type:"text", cache_control:{type:"ephemeral"}}`
+blocks, remainder uncached; no prefix returns the old plain-string shape), and the
+real client passes those blocks through a narrow `as unknown as string` cast (a string
+is assignable to the SDK's `string | TextBlockParam[]`), reading cache usage through a
+widened `UsageWithCache` shape. The pure function is what the tests exercise; the cast
+is the only place the SDK's stale types are worked around, documented at the call site.
+
+### D51: The assembler stable prefix carries the block separator so prefix + remainder is byte-identical
+
+`assemblePrompt` now exposes `stablePrefix` (the first four blocks: CANON, CHARACTERS,
+STORY SO FAR, PREVIOUS CHAPTER) and `variableRemainder` (CURRENT CHAPTER, TASK). To
+guarantee the cached path shows the model exactly the same bytes as the old
+single-string path, `stablePrefix` ends with the `"\n\n"` that used to join the two
+halves, so `stablePrefix + variableRemainder === prompt` exactly. The draft route
+passes `promptPrefix: stablePrefix, prompt: variableRemainder`; the API concatenates
+the two content blocks with no inserted separator, reconstituting the original prompt.
+The four/two split is where the content stops being stable across scene-by-scene draft
+calls (current-chapter drafted-so-far and the marked beats change every call).
+
+### D52: The revision cache prefix is system + chapter text
+
+For revision, the chapter text is the large stable block and the flagged spans plus
+task are the small variable remainder, so `promptPrefix` is the chapter text and the
+system prompt is cached separately. Both the em-dash retry and the patch-JSON retry
+reuse the cached system + chapter text and only resend the short remainder. Patch mode
+and full mode share the same `chapterPrefix`.
+
+### D53: Existing full-text tests keep exercising full mode via a same-key patch retry then fallback
+
+Patch mode is the default; the route falls back to full-text mode when the patch JSON
+fails to parse after one patch-mode retry. That retry deliberately reuses the SAME
+`fixtureKey` (not a `.retry` suffix, unlike the em-dash retry). Consequence: a fixture
+whose content is a full-text revision (the existing `revision.phase4.json` and
+`revision.emdashrev.json`) parses as "not a patch envelope" on both the first attempt
+and the same-key retry, so the route falls back and makes a fresh full-text-contract
+call using that same base fixtureKey, running the OLD full-text path (extract
+consistency fixes, em-dash lint with the `.retry` key, analyzeRevision) byte-for-byte
+as before. This is why `phase4.spec.ts` and the Phase 4 em-dash test pass UNCHANGED
+with no new fixtures and no spec edits: their fixtures are full-text, so they always
+take the fallback path. New patch fixtures (`revision.a4patch.json`) return a valid
+envelope on the first attempt and never retry or fall back. The extra fixture reads on
+the fallback path are harmless (fixtures are static files); token logging sums all
+calls into one `llm_calls` row.
+
+### D54: Patch mode uses complete(); full mode keeps streaming; the client buffers either way
+
+`ReviewEditor.revise()` reads the entire response body before locating the trailing
+control frame; it never renders streamed revision prose incrementally. So the mode's
+transport does not matter to the client: patch mode uses non-streaming `complete()`
+(SPEC A4.2 permits it) and full mode keeps the existing `stream()` behavior (SPEC
+requires it). Both end the same way, with `CONTROL_DELIM` + a JSON control frame that
+now carries `mode` and `failedPatches`. The UI shows an in-progress note while
+revising (defaulting to the patch-mode wording, since patch is the default), the mode
+that ran once the frame arrives, and any failed patches.
+
+### D55: Both fallback routes make a full-text-contract call; justifications are the declared entries
+
+The two fallbacks (flagged coverage > 40%, decided before any call; and patch JSON
+unparseable after one retry) converge on the same behavior: a full-text-contract call
+(system = `revisionSystemPrompt`, the old `## FLAGGED SPANS` / `## TASK` remainder)
+whose output flows through the unchanged `extractConsistencyFixes` + `analyzeRevision`
+path. In patch mode, `applyPatches` produces the revised full text mechanically and the
+justifications of the applied `consistency_fixes` are passed as the `consistencyFixes`
+string array to the UNMODIFIED `analyzeRevision`, so a `patch` touching an unflagged
+span is UNAUTHORIZED while a declared `consistency_fix` is DECLARED, reproducing Phase
+4's classification exactly. `analyzeRevision` and `applyResolution` are untouched, and
+the revisions table stores the same `{oldText, newText, flaggedSpans, consistencyFixes}`
+so `/resolve` recomputes identically for both modes.
+
+### D56: Patch-mode em-dash lint targets replacements; failed anchors are collected, not fatal
+
+In patch mode the model only authors the replacement text (originals are verbatim
+copies of existing chapter prose), so the em-dash lint checks the patch and
+consistency-fix REPLACEMENTS (`replacementsHaveEmDash`). A dirty replacement triggers
+one patch-mode retry (the `.retry` fixtureKey); if it is still dirty the revision
+proceeds but sets the existing `emDashUnresolved` warning. `applyPatches` anchors each
+`original` with the same `findSpan` the classifier uses, applies non-overlapping
+anchors offset-safely (resolve against the original text, sort by position, splice left
+to right, so order does not matter), and collects any patch whose anchor is absent or
+overlaps an already-accepted one as a `failedPatch` while the rest still apply. Failed
+patches surface in the control frame and the UI; they do not abort the revision.
+
+### D57: A dev-only llm_calls readback route backs the token-efficiency assertion
+
+`GET /api/dev/llm-calls` (disabled in production, mirroring `/api/dev/prompt`) returns
+recent `llm_calls` rows filtered by chapter and purpose. The A4 e2e asserts, through
+it, that the patch revision's logged `outputTokens` is a small fraction of the
+chapter's character count (a full rewrite of the ~600 char chapter would log well over
+100 output tokens; the patch envelope logs 48). This was the simplest compliant way to
+assert the token win end to end without weakening any existing check.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

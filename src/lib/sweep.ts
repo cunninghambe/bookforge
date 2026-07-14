@@ -4,7 +4,7 @@ import { assemblableCanon } from "./repo/canon";
 import { listChapters } from "./repo/chapters";
 import { latestDraft } from "./repo/drafts";
 import { logLlmCall } from "./repo/llm";
-import { sweepPrompt } from "./llm/prompts";
+import { sweepPrefix, sweepChapterPrompt } from "./llm/prompts";
 import { parseSweepResponse, type Contradiction } from "./llm/extraction";
 import type { LlmClient } from "./llm/client";
 import { orderToUiChapter } from "./chapterNumbering";
@@ -64,6 +64,9 @@ export async function runSweep(
   const lockedCanon = assemblableCanon(db, { projectId: input.projectId }).map(
     (f) => f.content,
   );
+  // A4.1: the locked-canon block is identical for every chapter, so it is the
+  // shared cacheable prefix; chapters 2..N of a run read it from the cache.
+  const prefix = sweepPrefix(lockedCanon);
 
   const reports: SweepChapterReport[] = [];
   let position = 0;
@@ -74,11 +77,10 @@ export async function runSweep(
     const number = orderToUiChapter(chapter.orderIndex);
     const title = chapter.title ?? `Chapter ${number}`;
 
-    const prompt = sweepPrompt({
+    const prompt = sweepChapterPrompt({
       chapterNumber: number,
       chapterTitle: title,
       text,
-      lockedCanon,
     });
     // Per-chapter fixture routing: base key plus the 1-based position in the swept
     // set, so each chapter can return a distinct fixture in tests. The real client
@@ -95,6 +97,7 @@ export async function runSweep(
       res = await client.complete({
         purpose: "sweep",
         model: input.model,
+        promptPrefix: prefix,
         prompt,
         maxTokens: 2048,
         fixtureKey,
@@ -116,6 +119,8 @@ export async function runSweep(
       chapterId: chapter.id,
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
+      cacheReadTokens: res.cacheReadTokens,
+      cacheWriteTokens: res.cacheWriteTokens,
     });
 
     const parsed = parseSweepResponse(res.text);

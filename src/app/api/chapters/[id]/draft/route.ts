@@ -55,12 +55,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       };
 
       try {
+        // A4.1: the stable prefix (canon, characters, story so far, previous
+        // chapter) is cached; only the variable remainder changes across the
+        // scene-by-scene draft calls and the em-dash retry.
         const r1 = await pump(
           client.stream({
             purpose: "draft",
             model,
             system: assembled.system,
-            prompt: assembled.prompt,
+            promptPrefix: assembled.stablePrefix,
+            prompt: assembled.variableRemainder,
             maxTokens: 4096,
             fixtureKey,
           }),
@@ -68,6 +72,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         let finalText = r1.text;
         let inputTokens = r1.inputTokens;
         let outputTokens = r1.outputTokens;
+        let cacheReadTokens = r1.cacheReadTokens ?? 0;
+        let cacheWriteTokens = r1.cacheWriteTokens ?? 0;
         let retried = false;
 
         // Em-dash lint: hard reject, auto-retry once.
@@ -83,8 +89,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
               purpose: "draft",
               model,
               system: assembled.system,
+              promptPrefix: assembled.stablePrefix,
               prompt:
-                assembled.prompt +
+                assembled.variableRemainder +
                 "\n\nIMPORTANT: your previous attempt used an em-dash, which is forbidden. Rewrite the same scene using commas, colons, full stops, or restructured sentences. No em-dashes.",
               maxTokens: 4096,
               fixtureKey: fixtureKey ? `${fixtureKey}.retry` : undefined,
@@ -93,9 +100,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           finalText = r2.text;
           inputTokens += r2.inputTokens;
           outputTokens += r2.outputTokens;
+          cacheReadTokens += r2.cacheReadTokens ?? 0;
+          cacheWriteTokens += r2.cacheWriteTokens ?? 0;
         }
 
-        logLlmCall(db, { purpose: "draft", chapterId, inputTokens, outputTokens });
+        logLlmCall(db, {
+          purpose: "draft",
+          chapterId,
+          inputTokens,
+          outputTokens,
+          cacheReadTokens,
+          cacheWriteTokens,
+        });
 
         const markers = extractMarkers(finalText);
         // Second-pass safety: if a retry still contains an em-dash, flag it so the

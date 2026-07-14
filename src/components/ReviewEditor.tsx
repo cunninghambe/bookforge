@@ -18,11 +18,20 @@ interface Hunk {
   declaredBy?: string;
 }
 
+interface FailedPatch {
+  original: string;
+  replacement: string;
+  reason: "not found" | "overlap";
+  isConsistencyFix: boolean;
+}
+
 interface RevisionControl {
   revisionId: number;
+  mode: "patch" | "full";
   hunks: Hunk[];
   unauthorizedCount: number;
   consistencyFixes: string[];
+  failedPatches: FailedPatch[];
   retried: boolean;
   emDashUnresolved: boolean;
   error?: string;
@@ -317,8 +326,58 @@ export function ReviewEditor({
           </button>
         </div>
 
+        {revising && (
+          <div
+            data-testid="revision-in-progress"
+            className="mt-4 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800"
+          >
+            Revising in patch mode. Applying the smallest set of changes...
+          </div>
+        )}
+
         {revision && (
           <div className="mt-4" data-testid="revision-panel">
+            <div
+              data-testid="revision-mode"
+              className="mb-3 inline-block rounded border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs uppercase tracking-wide text-neutral-600"
+            >
+              {revision.mode === "patch" ? "patch revision" : "full revision"}
+            </div>
+            {revision.failedPatches.length > 0 && (
+              <div
+                data-testid="failed-patches"
+                className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+              >
+                <p className="mb-2 font-medium">
+                  {revision.failedPatches.length} patch
+                  {revision.failedPatches.length === 1 ? "" : "es"} could not be
+                  anchored and {revision.failedPatches.length === 1 ? "was" : "were"}{" "}
+                  skipped. The remaining changes still applied.
+                </p>
+                <ul className="space-y-2">
+                  {revision.failedPatches.map((p, i) => (
+                    <li
+                      key={i}
+                      data-testid={`failed-patch-${i}`}
+                      className="rounded border border-amber-200 bg-white p-2"
+                    >
+                      <p className="text-xs uppercase text-neutral-400">
+                        {p.reason}
+                        {p.isConsistencyFix ? " (consistency fix)" : ""}
+                      </p>
+                      <p className="mt-1 text-neutral-700">
+                        <span className="text-neutral-400">original: </span>
+                        {p.original}
+                      </p>
+                      <p className="text-neutral-700">
+                        <span className="text-neutral-400">replacement: </span>
+                        {p.replacement}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {revision.retried && (
               <div
                 data-testid="revision-retry-alert"
