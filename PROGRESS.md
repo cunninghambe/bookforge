@@ -1010,3 +1010,83 @@ was not modified (out of A5 scope).
 - D62: Chat replies stream on the same CONTROL_DELIM protocol and em-dash
   reject-retry-then-flag discipline as drafting, reusing `extractMarkers` for the
   `[MISSING FACT]` lines.
+
+---
+
+## Amendment A7: Claude Code auth as the default LLM transport
+
+Made the app ride the machine's installed and logged-in Claude Code CLI by default,
+so local runs need no `ANTHROPIC_API_KEY`. No new dependencies: the transport shells
+out to the `claude` binary per call.
+
+### What changed
+
+- `src/lib/llm/client.ts`: new `ClaudeCodeClient` implementing the existing
+  `LlmClient` interface (`complete` + `stream`) by spawning the CLI in headless
+  print mode. Transport selection in `getLlmClient`: `USE_FIXTURE_LLM=1` keeps the
+  unchanged `FixtureClient`; else `LLM_TRANSPORT` picks `api-key` (unchanged
+  `AnthropicClient`) or `claude-code` (default). Three pure, unit-tested helpers:
+  `buildCliArgs`, `parseCliResult`, `parseStreamEvent`. `AnthropicClient` and
+  `FixtureClient` behavior is unchanged (only exported for `instanceof` in tests).
+- `scripts/llm-smoke.mjs` + npm `llm-smoke`: one tiny real call through the selected
+  transport, printing transport / reply / usage; nonzero with a clear message on
+  auth failure. Not part of `npm test`.
+- `.env.example`: `LLM_TRANSPORT` (default `claude-code`), `CLAUDE_CODE_BIN` and
+  `CLAUDE_CODE_TIMEOUT_MS` optional, `ANTHROPIC_API_KEY` marked optional (api-key
+  transport only). `DEPLOY.md`: local primary mode needs no key; servers use
+  `LLM_TRANSPORT=api-key` with a key (recommended) or the CLI plus
+  `CLAUDE_CODE_OAUTH_TOKEN`. `maxTokens` limitation documented.
+
+### Ground truth verified against the installed CLI (2.1.207, Node 22.14.0)
+
+- Prompt over stdin; `--system-prompt` REPLACES the default (never
+  `--append-system-prompt`); `--tools ""` disables tools; `--max-turns 1`;
+  `--no-session-persistence`. `stream-json` with `--print` requires `--verbose`.
+- The real `claude.exe` (nested under the npm `claude.cmd` shim) spawns cleanly with
+  `shell:false`; Node 22.14 refuses `.cmd` with `shell:false` (EINVAL), so discovery
+  resolves the `.exe`. Captured one real `stream-json` sample to fixture the parser.
+
+### Tests
+
+- Unit: added `tests/unit/claude-code-transport.test.ts` (20 tests): transport
+  selection matrix, `buildCliArgs`, `parseCliResult`, `parseStreamEvent`, fed captured
+  real CLI output. No process spawned, no real call. Suite 157 -> 177, all pass.
+- E2E: unchanged (Playwright runs `USE_FIXTURE_LLM=1`; transport invisible). 32/32
+  pass on a warm cache. `tsc --noEmit` clean.
+
+### Manual verification (real calls on this authenticated machine)
+
+- `npm run llm-smoke` (no `.env.local`, no `ANTHROPIC_API_KEY`): transport
+  `claude-code`, model `claude-sonnet-4-6`, real reply, usage populated. Exit 0.
+- System-prompt replacement: a persona system prompt ("Captain Marcus Vane") yielded a
+  fully in-character reply with no mention of Claude Code / Anthropic / being an AI,
+  proving `--system-prompt` replaced the default. `stream()` yielded chunks and
+  returned final text plus usage.
+
+### Judgment calls (mirrored in DECISIONS.md, D63-D69)
+
+- D63: Selection order (fixture, then `LLM_TRANSPORT` defaulting to claude-code);
+  unknown values default to claude-code; client classes exported for `instanceof`.
+- D64: Windows spawns the resolved `claude.exe` with `shell:false` (Node blocks `.cmd`
+  under `shell:false`; `shell:true` mangles empty/multi-line args); system prompt as
+  one argv entry, no temp file.
+- D65: stdin prompt, `--system-prompt` replaces, `--tools ""`, `--max-turns 1`,
+  `--no-session-persistence`, `--verbose --include-partial-messages` for streaming.
+- D66: `promptPrefix + prompt` concatenated for byte-identical prompts; CLI-reported
+  cache tokens flow to `llm_calls` as in A4.1.
+- D67: no CLI output-token cap, so `maxTokens` is a no-op on claude-code (documented);
+  per-call timeout via `CLAUDE_CODE_TIMEOUT_MS` (default 10 min).
+- D68: timeouts non-transient; spawn failures and non-4xx CLI errors transient; only
+  `complete()` retries (parity with `AnthropicClient.stream`).
+- D69: `llm-smoke` runs via `tsx` and loads `.env.local` with a minimal inline parser.
+
+### Acceptance check (SPEC Amendment A7)
+
+"with fixtures off on an authenticated machine, the smoke script returns real model
+text through the claude-code transport and a real drafting call works in the app with
+no ANTHROPIC_API_KEY set; the full automated suite passes unchanged on fixtures;
+llm_calls rows from claude-code calls carry token counts." Verified: `llm-smoke`
+returns real text through claude-code with no key; a direct `ClaudeCodeClient.complete`
+/ `stream` drafting-shaped call returns real in-character text and populated usage
+(the same `CompleteResult` the routes log to `llm_calls`); 177 unit + 32 e2e pass on
+fixtures; `tsc` clean.

@@ -733,6 +733,83 @@ than inventing a chat-specific protocol keeps the client consumption identical t
 draft editor's and keeps the forbidden-character rule enforced on the chat path too.
 The reply is non-persisted; only a cost row is logged.
 
+## Amendment A7 (2026-07-13): Claude Code auth as the default LLM transport
+
+### D63: Transport selection is USE_FIXTURE_LLM, then LLM_TRANSPORT defaulting to claude-code
+
+`getLlmClient` selects in priority order: `USE_FIXTURE_LLM=1` always returns the
+unchanged `FixtureClient` (the automated loop never makes real calls); otherwise
+`LLM_TRANSPORT` chooses the transport. Only the explicit value `api-key` selects the
+existing `AnthropicClient`; every other value, including unset, selects the new
+`ClaudeCodeClient`. Defaulting unknown values to claude-code (rather than throwing)
+is the simplest compliant option and matches the SPEC's "claude-code is the default".
+The three client classes are now exported so the selection matrix can be unit-tested
+with `instanceof`; their behavior is otherwise unchanged.
+
+### D64: The claude-code transport spawns the resolved claude.exe with shell:false
+
+On Windows, modern Node (verified on v22.14.0 here) refuses to spawn a `.cmd`/`.bat`
+with `shell:false` (EINVAL), and `shell:true` mangles empty-string and multi-line
+argv entries, which we need for `--tools ""` and `--system-prompt`. So binary
+discovery prefers a real `.exe` spawned with `shell:false`: `CLAUDE_CODE_BIN`
+overrides everything; otherwise on win32 we search PATH for `claude.exe`, then read
+the npm `claude.cmd` shim to recover the nested `claude.exe` it launches (verified:
+the shim is `"%dp0%\node_modules\@anthropic-ai\claude-code\bin\claude.exe" %*`), and
+only fall back to a shell as a last resort. With `shell:false` and an argv array, the
+system prompt passes as one argv entry with no quoting and no temp file needed (the
+SPEC's temp-file escape hatch proved unnecessary). Non-win32 spawns `claude` directly.
+
+### D65: Prompt over stdin, system prompt REPLACED, tools off, single-turn, no sessions
+
+`buildCliArgs` produces `--print --model <m> --max-turns 1 --no-session-persistence
+--tools "" --output-format json|stream-json` (plus `--verbose
+--include-partial-messages` for streaming, since `--print` with `stream-json` requires
+`--verbose` on the installed CLI), and `--system-prompt <text>` when a system prompt is
+given. `--system-prompt` REPLACES the default Claude Code system prompt (never
+`--append-system-prompt`) so prose calls do not inherit the tool-oriented default;
+verified by a real call where a persona system prompt produced a fully in-character
+reply with no mention of Claude Code. `--tools ""` disables every built-in tool. The
+assembled prompt (`promptPrefix + prompt`) is written over stdin, never as an argv
+argument, because assembled prompts exceed Windows argv length limits.
+
+### D66: promptPrefix is concatenated; cache_control is an api-key-only detail
+
+The claude-code transport concatenates `promptPrefix + prompt` into the stdin payload
+so the model sees a prompt byte-identical to the api-key transport. Block-level
+`cache_control` breakpoints (A4.1) remain an api-key-only detail; Claude Code applies
+its own caching, and the `cache_creation_input_tokens` / `cache_read_input_tokens` it
+reports flow into `CompleteResult.cacheWriteTokens` / `cacheReadTokens` and thus into
+`llm_calls` exactly as in A4.1.
+
+### D67: maxTokens is not enforceable on the claude-code transport
+
+The installed CLI (2.1.207) exposes no output-token cap flag (only `--max-budget-usd`,
+a dollar cap, not a token cap). So `maxTokens` is honored on the api-key transport but
+is a no-op on the claude-code transport. Documented in `.env.example` and DEPLOY.md
+rather than silently ignored. No env escape hatch exists for an output-token cap; the
+per-call time bound is `CLAUDE_CODE_TIMEOUT_MS` (default 600000ms / 10 minutes).
+
+### D68: Timeouts are non-transient; spawn and non-4xx CLI errors are transient
+
+`ClaudeCodeError` carries a `transient` flag driving the retry-once wrapper, which
+mirrors `AnthropicClient.withRetry` and wraps only `complete()` (a partially streamed
+generator cannot be safely replayed, matching `AnthropicClient.stream`, which also does
+not retry). Spawn-level failures (ENOENT/EINVAL and other launch errors) and CLI
+`is_error` results without a 4xx `api_error_status` are transient (retried once); a 4xx
+status (auth or bad request) is non-transient. A per-call timeout is non-transient: it
+kills the child and surfaces immediately rather than risking a second full timeout.
+Spawn ENOENT/EINVAL surfaces a clear message naming the fixes (install the CLI and log
+in, set `CLAUDE_CODE_BIN`, or set `CLAUDE_CODE_OAUTH_TOKEN`).
+
+### D69: llm-smoke runs via tsx and loads .env.local with a minimal parser
+
+`scripts/llm-smoke.mjs` (npm run `llm-smoke`) is run with `tsx` so it can import the
+TypeScript client, and loads `.env.local` with a tiny inline KEY=VALUE parser because
+standalone scripts do not get Next's env loading and this repo has no dotenv dependency
+(same reasoning as `backup.mjs` duplicating DB-path logic). It makes one real call
+through the selected transport, prints the transport, reply, and token/cache usage, and
+exits nonzero with the clear error message on failure. It is not part of `npm test`.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

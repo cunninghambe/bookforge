@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 // One injectable LLM client. In tests and E2E (USE_FIXTURE_LLM=1) a fixture player
 // answers from tests/fixtures/*.json so nothing ever hits the network. In real use
@@ -124,7 +125,7 @@ function loadFixture(purpose: LlmPurpose, fixtureKey?: string): FixtureFile {
   return JSON.parse(raw) as FixtureFile;
 }
 
-class FixtureClient implements LlmClient {
+export class FixtureClient implements LlmClient {
   async complete(opts: CompleteOptions): Promise<CompleteResult> {
     // promptPrefix is accepted and ignored by the fixture player.
     const fx = loadFixture(opts.purpose, opts.fixtureKey);
@@ -167,7 +168,7 @@ interface UsageWithCache {
 
 // ---- Real Anthropic client ------------------------------------------------
 
-class AnthropicClient implements LlmClient {
+export class AnthropicClient implements LlmClient {
   private async getSdk() {
     const mod = await import("@anthropic-ai/sdk");
     const Anthropic = mod.default;
@@ -257,14 +258,423 @@ class AnthropicClient implements LlmClient {
   }
 }
 
+// ---- Claude Code CLI client (A7) ------------------------------------------
+
+// The claude-code transport spawns the locally installed Claude Code CLI in
+// headless print mode, one child process per call. It rides the machine's
+// existing Claude Code auth so no ANTHROPIC_API_KEY is needed. The prompt goes
+// over stdin (assembled prompts exceed Windows argv length limits); the system
+// prompt, model, and flags go as argv entries. See DECISIONS D63-D69.
+
+// An error from the CLI transport. `transient` drives the retry-once wrapper:
+// spawn-level failures and non-4xx CLI errors are retried once; 4xx errors and
+// timeouts are surfaced immediately.
+export class ClaudeCodeError extends Error {
+  readonly transient: boolean;
+  constructor(message: string, opts?: { transient?: boolean }) {
+    super(message);
+    this.name = "ClaudeCodeError";
+    this.transient = opts?.transient ?? false;
+  }
+}
+
+// The subset of the CLI's --output-format json result object we read.
+interface CliResultShape {
+  type?: string;
+  subtype?: string;
+  is_error?: boolean;
+  api_error_status?: string | number | null;
+  result?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number | null;
+    cache_read_input_tokens?: number | null;
+  };
+}
+
+export interface CliArgsOptions {
+  model: string;
+  system?: string;
+  // stream-json plus partial messages when true; a single json result when false.
+  streaming: boolean;
+}
+
+// Pure: the argv list for a headless call. --system-prompt REPLACES the default
+// Claude Code system prompt (never --append-system-prompt), so bookforge's prose
+// calls do not inherit the tool-oriented default. --tools "" disables every
+// built-in tool and --max-turns 1 keeps it single-turn. Unit tested.
+export function buildCliArgs(opts: CliArgsOptions): string[] {
+  const args: string[] = [
+    "--print",
+    "--model",
+    opts.model,
+    "--max-turns",
+    "1",
+    "--no-session-persistence",
+    "--tools",
+    "",
+    "--output-format",
+    opts.streaming ? "stream-json" : "json",
+  ];
+  if (opts.streaming) {
+    args.push("--verbose", "--include-partial-messages");
+  }
+  if (opts.system !== undefined) {
+    args.push("--system-prompt", opts.system);
+  }
+  return args;
+}
+
+function has4xxStatus(status: string | number | null | undefined): boolean {
+  if (status === null || status === undefined) return false;
+  return /\b4\d\d\b/.test(String(status));
+}
+
+// Pure: map the CLI's json result object to a CompleteResult. is_error true or a
+// non-success subtype throws a ClaudeCodeError carrying the api_error_status or
+// result text; a 4xx status is non-transient. Missing usage fields tolerated.
+// Unit tested.
+export function parseCliResult(json: unknown): CompleteResult {
+  const obj = (json ?? {}) as CliResultShape;
+  if (obj.is_error === true || obj.subtype !== "success") {
+    const detail =
+      obj.api_error_status !== null && obj.api_error_status !== undefined
+        ? String(obj.api_error_status)
+        : typeof obj.result === "string" && obj.result.trim() !== ""
+          ? obj.result
+          : "unknown error";
+    throw new ClaudeCodeError(`Claude Code CLI returned an error: ${detail}`, {
+      transient: !has4xxStatus(obj.api_error_status),
+    });
+  }
+  const usage = obj.usage ?? {};
+  return {
+    text: typeof obj.result === "string" ? obj.result : "",
+    inputTokens: usage.input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? undefined,
+    cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
+  };
+}
+
+export type StreamEventParse =
+  | { kind: "delta"; text: string }
+  | { kind: "result"; result: CompleteResult }
+  | { kind: "other" };
+
+// Pure: interpret one line of --output-format stream-json. Text deltas arrive as
+// stream_event wrappers around content_block_delta/text_delta; the run ends with
+// a result object (same shape parseCliResult reads). Blank and non-JSON lines are
+// tolerated as "other". Unit tested.
+export function parseStreamEvent(line: string): StreamEventParse {
+  const trimmed = line.trim();
+  if (trimmed === "") return { kind: "other" };
+  let obj: {
+    type?: string;
+    event?: { type?: string; delta?: { type?: string; text?: unknown } };
+  };
+  try {
+    obj = JSON.parse(trimmed);
+  } catch {
+    return { kind: "other" };
+  }
+  if (
+    obj?.type === "stream_event" &&
+    obj.event?.type === "content_block_delta" &&
+    obj.event?.delta?.type === "text_delta" &&
+    typeof obj.event.delta.text === "string"
+  ) {
+    return { kind: "delta", text: obj.event.delta.text };
+  }
+  if (obj?.type === "result") {
+    return { kind: "result", result: parseCliResult(obj) };
+  }
+  return { kind: "other" };
+}
+
+// Per-call timeout. Generous default (10 minutes for prose), overridable.
+function cliTimeoutMs(): number {
+  const raw = process.env.CLAUDE_CODE_TIMEOUT_MS;
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 600000;
+}
+
+interface ResolvedBinary {
+  command: string;
+  useShell: boolean;
+}
+
+// Recover the real claude.exe path that an npm-generated claude.cmd shim invokes,
+// so we can spawn it directly (shell:false) rather than through a shell.
+function exeFromCmdShim(cmdPath: string): string | null {
+  try {
+    const text = readFileSync(cmdPath, "utf8");
+    const m = text.match(/%~?dp0%\\+([^"\r\n]*claude\.exe)/i);
+    if (!m) return null;
+    const exe = join(dirname(cmdPath), m[1]);
+    return existsSync(exe) ? exe : null;
+  } catch {
+    return null;
+  }
+}
+
+// Locate the CLI. CLAUDE_CODE_BIN overrides everything. On Windows we prefer a
+// real .exe spawned with shell:false: modern Node refuses to spawn a .cmd/.bat
+// with shell:false (EINVAL), and shell:true mangles empty-string and multi-line
+// argv entries (our --tools "" and --system-prompt). We search PATH for
+// claude.exe, then read the npm claude.cmd shim to find the nested claude.exe it
+// launches, and only fall back to a shell as a last resort. See D64.
+function resolveClaudeBinary(): ResolvedBinary {
+  const override = process.env.CLAUDE_CODE_BIN;
+  if (override && override.trim() !== "") {
+    return { command: override, useShell: false };
+  }
+  if (process.platform !== "win32") {
+    return { command: "claude", useShell: false };
+  }
+  const dirs = (process.env.PATH ?? "")
+    .split(";")
+    .filter((d) => d.trim() !== "");
+  for (const dir of dirs) {
+    const exe = join(dir, "claude.exe");
+    if (existsSync(exe)) return { command: exe, useShell: false };
+  }
+  for (const dir of dirs) {
+    const cmd = join(dir, "claude.cmd");
+    if (existsSync(cmd)) {
+      const exe = exeFromCmdShim(cmd);
+      if (exe) return { command: exe, useShell: false };
+      return { command: cmd, useShell: true };
+    }
+  }
+  return { command: "claude", useShell: true };
+}
+
+function spawnError(err: NodeJS.ErrnoException): ClaudeCodeError {
+  if (err.code === "ENOENT" || err.code === "EINVAL") {
+    return new ClaudeCodeError(
+      "Could not launch the Claude Code CLI. Install it (npm i -g @anthropic-ai/claude-code) and log in, set CLAUDE_CODE_BIN to the claude executable, or set CLAUDE_CODE_OAUTH_TOKEN for headless auth.",
+      { transient: true },
+    );
+  }
+  return new ClaudeCodeError(
+    `Failed to launch the Claude Code CLI: ${err.message}`,
+    { transient: true },
+  );
+}
+
+function cliExitMessage(code: number | null, stderr: string): string {
+  const s = stderr.trim();
+  return `Claude Code CLI exited with code ${code}.${
+    s ? " " + s : ""
+  } If this is an auth problem, run \`claude\` to log in, or set CLAUDE_CODE_OAUTH_TOKEN.`;
+}
+
+export class ClaudeCodeClient implements LlmClient {
+  // Retry once on transient errors (spawn failure, non-4xx CLI error), then
+  // surface. Mirrors AnthropicClient.withRetry; only complete() retries, matching
+  // AnthropicClient (a partially streamed generator cannot be safely replayed).
+  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      const transient = err instanceof ClaudeCodeError ? err.transient : false;
+      if (!transient) throw err;
+      return await fn();
+    }
+  }
+
+  async complete(opts: CompleteOptions): Promise<CompleteResult> {
+    // Concatenate so the model sees a prompt byte-identical to the api-key
+    // transport; block-level cache_control is an api-key-only detail (A7).
+    const payload = (opts.promptPrefix ?? "") + opts.prompt;
+    const args = buildCliArgs({
+      model: opts.model,
+      system: opts.system,
+      streaming: false,
+    });
+    return this.withRetry(
+      () =>
+        new Promise<CompleteResult>((resolvePromise, reject) => {
+          const { command, useShell } = resolveClaudeBinary();
+          const child = spawn(command, args, {
+            shell: useShell,
+            windowsHide: true,
+          });
+          let stdout = "";
+          let stderr = "";
+          let settled = false;
+          const finish = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn();
+          };
+          const timer = setTimeout(() => {
+            child.kill();
+            finish(() =>
+              reject(
+                new ClaudeCodeError(
+                  `Claude Code CLI timed out after ${cliTimeoutMs()}ms.`,
+                  { transient: false },
+                ),
+              ),
+            );
+          }, cliTimeoutMs());
+          child.stdout?.on("data", (d) => (stdout += d.toString()));
+          child.stderr?.on("data", (d) => (stderr += d.toString()));
+          child.on("error", (err) =>
+            finish(() => reject(spawnError(err as NodeJS.ErrnoException))),
+          );
+          child.on("close", (code) =>
+            finish(() => {
+              if (code !== 0 && stdout.trim() === "") {
+                reject(
+                  new ClaudeCodeError(cliExitMessage(code, stderr), {
+                    transient: true,
+                  }),
+                );
+                return;
+              }
+              let json: unknown;
+              try {
+                json = JSON.parse(stdout);
+              } catch {
+                reject(
+                  new ClaudeCodeError(
+                    `Claude Code CLI produced unparseable JSON output. stderr: ${stderr.trim()}`,
+                    { transient: true },
+                  ),
+                );
+                return;
+              }
+              try {
+                resolvePromise(parseCliResult(json));
+              } catch (err) {
+                reject(err);
+              }
+            }),
+          );
+          child.stdin?.write(payload);
+          child.stdin?.end();
+        }),
+    );
+  }
+
+  async *stream(
+    opts: CompleteOptions,
+  ): AsyncGenerator<string, CompleteResult, unknown> {
+    const payload = (opts.promptPrefix ?? "") + opts.prompt;
+    const args = buildCliArgs({
+      model: opts.model,
+      system: opts.system,
+      streaming: true,
+    });
+    const { command, useShell } = resolveClaudeBinary();
+    const child = spawn(command, args, { shell: useShell, windowsHide: true });
+    let stderr = "";
+    let spawnErr: ClaudeCodeError | null = null;
+    let timedOut = false;
+    child.stderr?.on("data", (d) => (stderr += d.toString()));
+    child.on("error", (err) => {
+      spawnErr = spawnError(err as NodeJS.ErrnoException);
+    });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, cliTimeoutMs());
+    child.stdin?.write(payload);
+    child.stdin?.end();
+
+    let buffer = "";
+    let text = "";
+    let finalResult: CompleteResult | null = null;
+    const consume = (line: string): string | null => {
+      const parsed = parseStreamEvent(line);
+      if (parsed.kind === "delta") {
+        text += parsed.text;
+        return parsed.text;
+      }
+      if (parsed.kind === "result") {
+        finalResult = parsed.result;
+      }
+      return null;
+    };
+
+    try {
+      if (!child.stdout) {
+        throw new ClaudeCodeError("Claude Code CLI produced no stdout stream.", {
+          transient: true,
+        });
+      }
+      for await (const chunk of child.stdout) {
+        buffer += chunk.toString();
+        let idx: number;
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 1);
+          const delta = consume(line);
+          if (delta !== null) yield delta;
+        }
+      }
+      if (buffer.trim() !== "") {
+        const delta = consume(buffer);
+        if (delta !== null) yield delta;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+
+    const code: number | null = await new Promise((res) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        res(child.exitCode);
+      } else {
+        child.on("close", (c) => res(c));
+      }
+    });
+
+    if (spawnErr) throw spawnErr;
+    if (timedOut) {
+      throw new ClaudeCodeError(
+        `Claude Code CLI timed out after ${cliTimeoutMs()}ms.`,
+        { transient: false },
+      );
+    }
+    if (!finalResult) {
+      if (code !== 0) throw new ClaudeCodeError(cliExitMessage(code, stderr));
+      throw new ClaudeCodeError(
+        `Claude Code CLI stream ended without a result. stderr: ${stderr.trim()}`,
+        { transient: true },
+      );
+    }
+    const result: CompleteResult = finalResult;
+    return {
+      text,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      cacheReadTokens: result.cacheReadTokens,
+      cacheWriteTokens: result.cacheWriteTokens,
+    };
+  }
+}
+
 let _client: LlmClient | null = null;
 
+// Transport selection (A7), in priority order: USE_FIXTURE_LLM=1 always keeps
+// the fixture player (the test loop never makes real calls); otherwise
+// LLM_TRANSPORT selects the transport, defaulting to "claude-code". Only the
+// explicit value "api-key" chooses the ANTHROPIC_API_KEY-backed client; any other
+// value (including unset) is the Claude Code CLI transport. See D63.
 export function getLlmClient(): LlmClient {
   if (_client) return _client;
-  _client =
-    process.env.USE_FIXTURE_LLM === "1"
-      ? new FixtureClient()
-      : new AnthropicClient();
+  if (process.env.USE_FIXTURE_LLM === "1") {
+    _client = new FixtureClient();
+  } else if (process.env.LLM_TRANSPORT === "api-key") {
+    _client = new AnthropicClient();
+  } else {
+    _client = new ClaudeCodeClient();
+  }
   return _client;
 }
 

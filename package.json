@@ -14,6 +14,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "backup": "node scripts/backup.mjs",
+    "llm-smoke": "tsx scripts/llm-smoke.mjs",
     "pretest:e2e": "node scripts/clean-test-db.mjs"
   },
   "dependencies": {

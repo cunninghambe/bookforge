@@ -5,13 +5,36 @@
 ```
 npm install
 cp .env.example .env.local
-# fill in ANTHROPIC_API_KEY, APP_PASSWORD, SESSION_SECRET in .env.local
+# fill in APP_PASSWORD and SESSION_SECRET in .env.local
 npm run dev
 ```
 
 Open http://localhost:3000, log in with APP_PASSWORD. The SQLite database is
 created automatically on first request at `./data/bookforge.db` (or wherever
 `DATABASE_PATH` points), migrated and seeded idempotently.
+
+## LLM transport (A7)
+
+The default `LLM_TRANSPORT=claude-code` rides the locally installed and logged-in
+Claude Code CLI, so the primary local mode needs no `ANTHROPIC_API_KEY` at all:
+install Claude Code, run `claude` once to log in, and `npm run dev` just works.
+The CLI is discovered as `claude` on PATH (override with `CLAUDE_CODE_BIN`).
+
+Verify auth end to end with a single tiny real call:
+
+```
+npm run llm-smoke
+```
+
+It prints the transport, the reply, and token/cache usage, and exits nonzero with
+a clear message if the CLI is missing or not logged in. It is not part of
+`npm test`.
+
+To use an API key instead, set `LLM_TRANSPORT=api-key` and `ANTHROPIC_API_KEY`.
+
+Limitation: the Claude Code CLI has no output-token cap flag, so `maxTokens` is
+not enforced on the claude-code transport (it is honored on the api-key
+transport). The per-call timeout is `CLAUDE_CODE_TIMEOUT_MS` (default 600000ms).
 
 `DATABASE_PATH` is optional and defaults to `./data/bookforge.db`. Set it to an
 absolute path to store the database elsewhere; the parent directory is created
@@ -49,6 +72,13 @@ docker run -p 3000:3000 \
 `DATABASE_PATH` defaults to `/data/bookforge.db` inside the image, matching the
 mounted volume above.
 
+For servers, recommend the api-key transport: set `LLM_TRANSPORT=api-key` and
+`ANTHROPIC_API_KEY` (as shown above). Alternatively, install the Claude Code CLI
+in the image and supply `CLAUDE_CODE_OAUTH_TOKEN` (minted with `claude
+setup-token` on a logged-in machine) so the default claude-code transport can
+authenticate headlessly. The api-key transport is simpler and the recommended
+choice for server deploys.
+
 The image is a multi-stage build: dependencies and the Next.js standalone build
 happen in Debian-based build stages (better-sqlite3 needs `python3 make g++` as
 a fallback when no prebuilt binary matches the target platform); the runtime
@@ -69,10 +99,14 @@ One-time setup:
 flyctl launch --no-deploy --copy-config --name <your-app-name>
 flyctl volumes create bookforge_data --size 1 --region <your-region>
 flyctl secrets set \
+  LLM_TRANSPORT=api-key \
   ANTHROPIC_API_KEY=<key> \
   APP_PASSWORD=<password> \
   SESSION_SECRET=$(openssl rand -hex 32)
 ```
+
+`LLM_TRANSPORT=api-key` is the recommended server setting (see the Docker section
+for the CLI-plus-`CLAUDE_CODE_OAUTH_TOKEN` alternative).
 
 Then, and for every subsequent deploy:
 
