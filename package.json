@@ -16,6 +16,7 @@
     "backup": "node scripts/backup.mjs",
     "mcp": "tsx src/mcp/server.ts",
     "llm-smoke": "tsx scripts/llm-smoke.mjs",
+    "ui-shots": "node scripts/ui-shots.mjs",
     "pretest:e2e": "node scripts/clean-test-db.mjs"
   },
   "dependencies": {

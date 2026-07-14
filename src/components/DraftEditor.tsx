@@ -205,14 +205,14 @@ export function DraftEditor({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           rows={28}
-          className="w-full rounded border border-neutral-300 p-4 font-serif text-[15px] leading-relaxed"
+          className="w-full max-w-[70ch] rounded border border-edge bg-surface p-4 font-serif text-[15px] leading-relaxed text-ink"
         />
         <div className="mt-3 flex items-center gap-3">
           <button
             data-testid="continue-button"
             onClick={() => generate("continue")}
             disabled={streaming || selectedBeats.length === 0}
-            className="rounded bg-neutral-900 px-4 py-1.5 text-white disabled:opacity-50"
+            className="rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-accent-ink disabled:opacity-50"
           >
             {streaming ? "Drafting..." : "Continue"}
           </button>
@@ -220,7 +220,7 @@ export function DraftEditor({
             data-testid="redraft-button"
             onClick={() => generate("redraft")}
             disabled={streaming}
-            className="rounded border border-neutral-300 px-4 py-1.5 disabled:opacity-50"
+            className="rounded border border-edge px-4 py-1.5 disabled:opacity-50"
           >
             Redraft
           </button>
@@ -228,19 +228,19 @@ export function DraftEditor({
             data-testid="save-draft-button"
             onClick={() => save()}
             disabled={streaming}
-            className="rounded border border-neutral-300 px-4 py-1.5 disabled:opacity-50"
+            className="rounded border border-edge px-4 py-1.5 disabled:opacity-50"
           >
             Save
           </button>
-          {saved && <span className="text-sm text-green-600">Saved</span>}
+          {saved && <span className="text-sm text-ok-ink">Saved</span>}
         </div>
       </div>
 
       <aside className="text-sm">
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-neutral-400">
+        <h2 className="mb-2 text-xs uppercase tracking-wide text-faint">
           Beats to draft
         </h2>
-        <p className="mb-2 text-xs text-neutral-400">POV: {pov}</p>
+        <p className="mb-2 text-xs text-faint">POV: {pov}</p>
         <ul className="space-y-1" data-testid="beat-picker">
           {beats.map((b, i) => (
             <li key={i}>
@@ -253,14 +253,14 @@ export function DraftEditor({
                   className="mt-1"
                 />
                 <span>
-                  <span className="text-neutral-400">{i + 1}. </span>
+                  <span className="text-faint">{i + 1}. </span>
                   {b}
                 </span>
               </label>
             </li>
           ))}
           {beats.length === 0 && (
-            <li className="text-neutral-400">No beats. Add beats in the sequencer.</li>
+            <li className="text-faint">No beats. Add beats in the sequencer.</li>
           )}
         </ul>
       </aside>
@@ -279,8 +279,8 @@ function Alert({
 }) {
   const cls =
     kind === "warn"
-      ? "border-amber-300 bg-amber-50 text-amber-800"
-      : "border-sky-300 bg-sky-50 text-sky-800";
+      ? "border-warn-edge bg-warn text-warn-ink"
+      : "border-info-edge bg-info text-info-ink";
   return (
     <div
       data-testid={testid}
@@ -314,7 +314,7 @@ function MissingFactAlert({
   return (
     <div
       data-testid="missing-fact"
-      className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900"
+      className="rounded border border-warn-edge bg-warn px-3 py-2 text-warn-ink"
     >
       <p className="mb-1 font-medium">Missing fact: {text}</p>
       {!added ? (
@@ -323,7 +323,7 @@ function MissingFactAlert({
             aria-label="Missing fact type"
             value={type}
             onChange={(e) => setType(e.target.value)}
-            className="rounded border border-amber-300 bg-white px-2 py-1 text-xs"
+            className="rounded border border-warn-edge bg-surface px-2 py-1 text-xs"
           >
             {CANON_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -335,23 +335,23 @@ function MissingFactAlert({
             aria-label="Missing fact answer"
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            className="min-w-[16rem] flex-1 rounded border border-amber-300 px-2 py-1 text-xs"
+            className="min-w-[16rem] flex-1 rounded border border-warn-edge px-2 py-1 text-xs"
           />
           <button
             data-testid="add-fact-button"
             onClick={add}
-            className="rounded bg-neutral-900 px-2 py-1 text-xs text-white"
+            className="rounded bg-accent hover:bg-accent-hover px-2 py-1 text-xs text-accent-ink"
           >
             Add to canon (locked)
           </button>
         </div>
       ) : (
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-green-700">Added and locked.</span>
+          <span className="text-ok-ink">Added and locked.</span>
           <button
             data-testid="redraft-after-fact"
             onClick={onAdded}
-            className="rounded border border-amber-300 px-2 py-1"
+            className="rounded border border-warn-edge px-2 py-1"
           >
             Redraft with this fact
           </button>

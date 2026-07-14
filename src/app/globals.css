@@ -2,8 +2,106 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Amendment A9 design tokens. Semantic colors are defined once here as RGB
+ * triplets, per theme, and mapped into the Tailwind palette in
+ * tailwind.config.ts so components use classes like bg-paper, text-ink,
+ * border-edge, bg-warn. Light keeps a warm paper; dark is a warm dark gray
+ * (never pure black) with off-white ink and full contrast on reading surfaces.
+ */
+
 :root {
   color-scheme: light;
+
+  /* Reading and chrome surfaces */
+  --paper: 250 249 246;      /* warm page background */
+  --surface: 254 253 250;    /* cards, inputs, pre blocks (warm, not clinical white) */
+  --inset: 243 241 234;      /* recessed grouping panels */
+  --chip: 233 230 221;       /* pills and tags */
+
+  /* Text */
+  --ink: 28 27 25;           /* primary, full contrast */
+  --muted: 104 100 92;       /* secondary chrome text */
+  --faint: 150 145 135;      /* captions, meta, labels */
+
+  /* Lines */
+  --edge: 213 208 197;       /* interactive borders (inputs, buttons) */
+  --edge-soft: 229 224 214;  /* card borders and dividers */
+
+  /* Accent (primary action) */
+  --accent: 28 27 25;        /* near-black on light */
+  --accent-ink: 250 249 246; /* label on accent */
+  --accent-hover: 58 54 48;
+
+  /* Focus ring (calm slate-blue, both themes) */
+  --focus: 91 107 154;
+
+  /* Alerts: warn (amber), info (sky), danger (red), ok (green) */
+  --warn: 253 246 227;
+  --warn-ink: 146 64 14;
+  --warn-edge: 245 213 138;
+  --warn-chip: 254 243 199;
+
+  --info: 240 249 255;
+  --info-ink: 7 89 133;
+  --info-edge: 147 205 240;
+  --info-chip: 224 242 254;
+
+  --danger: 254 242 242;
+  --danger-ink: 153 27 27;
+  --danger-edge: 246 178 178;
+  --danger-chip: 254 226 226;
+  --danger-strong: 220 78 78;
+
+  --ok: 240 253 244;
+  --ok-ink: 22 101 52;
+  --ok-edge: 150 216 173;
+  --ok-chip: 220 252 231;
+  --ok-strong: 45 168 100;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --paper: 26 25 23;         /* warm dark gray, never pure black */
+  --surface: 38 36 32;       /* raised cards, inputs */
+  --inset: 32 30 27;         /* recessed grouping panels */
+  --chip: 50 47 42;
+
+  --ink: 236 232 224;        /* off-white, full contrast on reading surfaces */
+  --muted: 168 162 152;      /* slightly reduced contrast on chrome */
+  --faint: 124 118 108;
+
+  --edge: 60 57 51;
+  --edge-soft: 47 45 40;
+
+  --accent: 236 232 224;     /* off-white raised button on dark */
+  --accent-ink: 26 25 23;
+  --accent-hover: 214 209 199;
+
+  --focus: 142 166 216;
+
+  --warn: 58 46 23;
+  --warn-ink: 240 198 116;
+  --warn-edge: 107 83 32;
+  --warn-chip: 74 58 29;
+
+  --info: 22 48 61;
+  --info-ink: 127 196 232;
+  --info-edge: 42 90 114;
+  --info-chip: 29 61 77;
+
+  --danger: 58 31 31;
+  --danger-ink: 240 160 160;
+  --danger-edge: 110 53 53;
+  --danger-chip: 74 38 38;
+  --danger-strong: 208 90 90;
+
+  --ok: 28 51 39;
+  --ok-ink: 143 214 168;
+  --ok-edge: 47 95 68;
+  --ok-chip: 35 64 48;
+  --ok-strong: 69 176 114;
 }
 
 html,
@@ -12,8 +110,49 @@ body {
 }
 
 body {
-  background-color: #faf9f6;
-  color: #1c1b19;
+  background-color: rgb(var(--paper));
+  color: rgb(var(--ink));
 }
 
-/* Calm, text-forward. No dashboard chrome. */
+@layer base {
+  /* Subtle transitions on hover, focus, and theme change only. */
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  [tabindex] {
+    transition: background-color 0.15s ease, border-color 0.15s ease,
+      color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  /* Visible keyboard focus everywhere, including the tabindex approval rows.
+     Scoped to focus-visible so mouse clicks stay quiet. */
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 2px solid rgb(var(--focus));
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  /* Button hierarchy as shared recipes. Size and width stay inline so each
+     call site keeps its own padding rhythm. */
+  .btn-primary {
+    @apply rounded bg-accent text-accent-ink hover:bg-accent-hover disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply rounded border border-edge text-ink hover:bg-inset disabled:opacity-50;
+  }
+  .btn-quiet {
+    @apply text-muted hover:text-ink hover:underline disabled:opacity-50;
+  }
+  .btn-danger {
+    @apply text-danger-ink hover:underline disabled:opacity-50;
+  }
+}

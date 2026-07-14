@@ -188,22 +188,22 @@ export function CharacterChat({
       {!pin ? (
         <div
           data-testid="pin-form-wrap"
-          className="rounded border border-neutral-200 bg-white p-4"
+          className="rounded border border-edge-soft bg-surface p-4"
         >
-          <p data-testid="chat-opening" className="mb-3 text-sm text-neutral-700">
+          <p data-testid="chat-opening" className="mb-3 text-sm text-ink">
             Before we speak, tell me when in the book I am. Pick a book and a
             chapter, and I will answer as I was at that moment, knowing only what I
             knew then.
           </p>
           <form onSubmit={setMoment} className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-neutral-400">
+            <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-faint">
               Book
               <select
                 aria-label="Pin book"
                 data-testid="chat-book"
                 value={formProject}
                 onChange={(e) => setFormProject(e.target.value)}
-                className="rounded border border-neutral-300 px-2 py-1 text-sm normal-case tracking-normal text-neutral-900"
+                className="rounded border border-edge px-2 py-1 text-sm normal-case tracking-normal text-ink"
               >
                 {projects.map((p) => (
                   <option key={p.id} value={String(p.id)}>
@@ -212,7 +212,7 @@ export function CharacterChat({
                 ))}
               </select>
             </label>
-            <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-neutral-400">
+            <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-faint">
               Chapter (1 = first)
               <input
                 aria-label="Pin chapter"
@@ -222,11 +222,11 @@ export function CharacterChat({
                 max={selectedChapterCount > 0 ? selectedChapterCount : undefined}
                 value={formChapter}
                 onChange={(e) => setFormChapter(e.target.value)}
-                className="w-24 rounded border border-neutral-300 px-2 py-1 text-sm normal-case tracking-normal text-neutral-900"
+                className="w-24 rounded border border-edge px-2 py-1 text-sm normal-case tracking-normal text-ink"
               />
               <span
                 data-testid="pin-range"
-                className="text-xs normal-case tracking-normal text-neutral-400"
+                className="text-xs normal-case tracking-normal text-faint"
               >
                 Valid chapters: {pinRangeLabel(selectedChapterCount)}
               </span>
@@ -234,7 +234,7 @@ export function CharacterChat({
             <button
               type="submit"
               data-testid="set-pin-button"
-              className="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white"
+              className="rounded bg-accent hover:bg-accent-hover px-3 py-1.5 text-sm text-accent-ink"
             >
               Set the moment
             </button>
@@ -243,7 +243,7 @@ export function CharacterChat({
       ) : (
         <div
           data-testid="chat-pin"
-          className="mb-4 flex items-center justify-between rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm"
+          className="mb-4 flex items-center justify-between rounded border border-edge-soft bg-inset px-3 py-2 text-sm"
         >
           <span>
             Pinned to <b>{pinnedProjectTitle}</b>, chapter{" "}
@@ -252,7 +252,7 @@ export function CharacterChat({
           <button
             data-testid="change-pin-button"
             onClick={changeMoment}
-            className="rounded border border-neutral-300 px-2 py-1 text-xs"
+            className="rounded border border-edge px-2 py-1 text-xs"
           >
             Change the moment
           </button>
@@ -263,7 +263,7 @@ export function CharacterChat({
         <>
           <ul className="space-y-3" data-testid="chat-messages">
             {turns.length === 0 && !streaming && (
-              <li className="text-sm text-neutral-400" data-testid="chat-empty">
+              <li className="text-sm text-faint" data-testid="chat-empty">
                 Ask {characterName} anything about this moment.
               </li>
             )}
@@ -272,7 +272,7 @@ export function CharacterChat({
                 <li
                   key={i}
                   data-testid="user-message"
-                  className="ml-auto max-w-[85%] rounded bg-neutral-900 px-3 py-2 text-sm text-white"
+                  className="ml-auto max-w-[85%] rounded bg-accent hover:bg-accent-hover px-3 py-2 text-sm text-accent-ink"
                 >
                   {t.text}
                 </li>
@@ -292,9 +292,9 @@ export function CharacterChat({
             {streaming && (
               <li
                 data-testid="streaming-message"
-                className="max-w-[85%] rounded border border-neutral-200 bg-white px-3 py-2 font-serif text-sm text-neutral-800"
+                className="max-w-[85%] rounded border border-edge-soft bg-surface px-3 py-2 font-serif text-sm text-ink"
               >
-                {streamText || <span className="text-neutral-400">...</span>}
+                {streamText || <span className="text-faint">...</span>}
               </li>
             )}
           </ul>
@@ -307,13 +307,13 @@ export function CharacterChat({
               onChange={(e) => setInput(e.target.value)}
               disabled={streaming}
               placeholder={`Say something to ${characterName}...`}
-              className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm"
+              className="flex-1 rounded border border-edge px-3 py-2 text-sm"
             />
             <button
               type="submit"
               data-testid="send-button"
               disabled={streaming || input.trim().length === 0}
-              className="rounded bg-neutral-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+              className="rounded bg-accent hover:bg-accent-hover px-4 py-2 text-sm text-accent-ink disabled:opacity-50"
             >
               {streaming ? "..." : "Send"}
             </button>
@@ -346,14 +346,14 @@ function BotMessage({
   return (
     <li
       data-testid="bot-message"
-      className="max-w-[85%] rounded border border-neutral-200 bg-white px-3 py-2 font-serif text-sm text-neutral-800"
+      className="max-w-[85%] rounded border border-edge-soft bg-surface px-3 py-2 font-serif text-sm text-ink"
     >
       <p className="whitespace-pre-wrap">{text}</p>
 
       {emDashUnresolved && (
         <p
           data-testid={`bot-emdash-${index}`}
-          className="mt-2 text-xs text-amber-700"
+          className="mt-2 text-xs text-warn-ink"
         >
           This reply still contains an em-dash after a retry.
         </p>
@@ -363,7 +363,7 @@ function BotMessage({
         <p
           key={i}
           data-testid={`missing-fact-note-${index}`}
-          className="mt-2 rounded bg-neutral-50 px-2 py-1 text-xs text-neutral-500"
+          className="mt-2 rounded bg-inset px-2 py-1 text-xs text-muted"
         >
           Missing fact: {f}
         </p>
@@ -374,7 +374,7 @@ function BotMessage({
           <button
             data-testid={`propose-fact-${index}`}
             onClick={() => setProposing(true)}
-            className="text-xs text-neutral-500 hover:underline"
+            className="text-xs text-muted hover:underline"
           >
             Propose as canon fact
           </button>
@@ -438,7 +438,7 @@ function ProposeFactForm({
     return (
       <p
         data-testid={`propose-success-${index}`}
-        className="text-xs text-green-700"
+        className="text-xs text-ok-ink"
       >
         Proposed as a provisional fact. Review and lock it in the canon manager.
       </p>
@@ -449,7 +449,7 @@ function ProposeFactForm({
     <form
       onSubmit={submit}
       data-testid={`propose-form-${index}`}
-      className="mt-1 space-y-2 rounded border border-neutral-200 bg-neutral-50 p-2 text-xs"
+      className="mt-1 space-y-2 rounded border border-edge-soft bg-inset p-2 text-xs"
     >
       <div className="flex flex-wrap items-center gap-2">
         <select
@@ -457,7 +457,7 @@ function ProposeFactForm({
           data-testid={`propose-type-${index}`}
           value={type}
           onChange={(e) => setType(e.target.value)}
-          className="rounded border border-neutral-300 bg-white px-2 py-1"
+          className="rounded border border-edge bg-surface px-2 py-1"
         >
           {CANON_TYPES.map((t) => (
             <option key={t} value={t}>
@@ -470,7 +470,7 @@ function ProposeFactForm({
           data-testid={`propose-scope-${index}`}
           value={scope}
           onChange={(e) => setScope(e.target.value)}
-          className="rounded border border-neutral-300 bg-white px-2 py-1"
+          className="rounded border border-edge bg-surface px-2 py-1"
         >
           {projects.map((p) => (
             <option key={p.id} value={String(p.id)}>
@@ -486,21 +486,21 @@ function ProposeFactForm({
         value={content}
         onChange={(e) => setContent(e.target.value)}
         rows={3}
-        className="w-full rounded border border-neutral-300 px-2 py-1 font-sans text-neutral-900"
+        className="w-full rounded border border-edge px-2 py-1 font-sans text-ink"
       />
       <div className="flex items-center gap-2">
         <button
           type="submit"
           data-testid={`propose-submit-${index}`}
           disabled={busy || content.trim().length === 0}
-          className="rounded bg-neutral-900 px-2 py-1 text-white disabled:opacity-50"
+          className="rounded bg-accent hover:bg-accent-hover px-2 py-1 text-accent-ink disabled:opacity-50"
         >
           Propose as provisional fact
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="rounded border border-neutral-300 px-2 py-1"
+          className="rounded border border-edge px-2 py-1"
         >
           Cancel
         </button>

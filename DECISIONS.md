@@ -1079,6 +1079,101 @@ chat becomes heavy. Not built: it would require the claude-code transport to hol
 resume a session id per conversation, which the current per-call spawn model does not
 do, and it is out of A5.1 scope.
 
+## Amendment A9: design pass with dark mode
+
+### D90: Semantic tokens as CSS-variable RGB triplets, mapped into Tailwind
+
+Colors are defined once in `src/app/globals.css` as `--name: R G B` triplets,
+light on `:root` and dark on `.dark`, and mapped in `tailwind.config.ts` with
+`rgb(var(--name) / <alpha-value>)` so Tailwind opacity modifiers still work. The
+triplet form (not `#hex`) is what makes `bg-warn/50` and `text-ink/70` possible.
+`globals.css` and `tailwind.config.ts` define the tokens and are exempt from the
+repo check by nature.
+
+The token vocabulary (small and semantic):
+
+- Surfaces: `paper` (page), `surface` (cards, inputs, pre blocks), `inset`
+  (recessed grouping panels), `chip` (pills and tags).
+- Text: `ink` (primary, full contrast), `muted` (secondary chrome), `faint`
+  (captions, meta, labels).
+- Lines: `edge` (interactive borders), `edge-soft` (card borders and dividers;
+  also the bare-`border` default via `borderColor.DEFAULT`).
+- Accent: `accent` (primary action fill), `accent-ink` (label on accent),
+  `accent-hover`.
+- `focus` (the keyboard focus ring, a calm slate-blue in both themes).
+- Alert families `warn` (amber), `info` (sky), `danger` (red), `ok` (green), each
+  with `DEFAULT` (fill), `ink` (text), `edge` (border), `chip` (badge fill);
+  `danger` and `ok` add `strong` for the selected accept/reject borders.
+
+### D91: The accent is a monochrome inversion (no new hue)
+
+Primary buttons stay monochrome: light uses a near-black fill with paper-colored
+ink; dark inverts to an off-white fill with dark ink. A near-black button would
+vanish on the dark paper, so inversion is the simplest compliant option that keeps
+"quiet confidence" without introducing a brand hue. Recorded per the ambiguity
+rule. The only hue introduced anywhere is the focus ring (`focus`), which is a
+standard accessibility affordance, not decoration.
+
+### D92: Dark theme keeps full contrast on reading surfaces, reduced on chrome
+
+Dark `ink` is a warm off-white (`236 232 224`) on warm dark-gray `paper`
+(`26 25 23`, never pure black), so the draft textarea, review prose, chat, and
+summaries stay high-contrast for reading. `muted`/`faint` and `edge` are pulled in
+for chrome so navigation and borders sit back. Alert fills are darkened and their
+`ink` lightened for dark legibility.
+
+### D93: The migration was a deterministic 1:1 class swap, scripted then verified
+
+`scripts/a9-migrate.mjs` applied exact-substring replacements (raw palette class to
+token class) across `src/app` and `src/components`, so the sweep is auditable and
+re-runnable rather than hand-edited file by file. The forbidden list in the repo
+check (`tests/unit/a9-tokens.test.ts`) matches exactly what was migrated: `bg-white`,
+`text-white`, and the `neutral` / `amber` / `sky` / `red` / `green` scales across
+`bg-`, `text-`, `border-`, and `divide-`. Text neutrals collapsed by role
+(700/800/900 to `ink`, 500/600 to `muted`, 400 to `faint`); the four alert palettes
+collapsed their text shades to a single `*-ink` per family. Button hierarchy became
+consistent recipes: primary is `bg-accent hover:bg-accent-hover text-accent-ink`,
+secondary is `border border-edge`, quiet is `text-muted hover:text-ink`, destructive
+is `text-danger-ink`; the four are also available as `.btn-*` classes in the
+components layer (used by the theme toggle).
+
+### D94: Theme persisted in a plain year-long cookie, read server-side for no flash
+
+`bookforge_theme=dark|light` is a plain (not httpOnly) cookie, `path=/`, one year,
+so the client toggle in `TopNav` (`ThemeToggle.tsx`, `data-testid="theme-toggle"`)
+can both flip `document.documentElement`'s `dark` class immediately and write the
+cookie. The root layout is `async` and reads the cookie with `next/headers`
+`cookies()`, stamping `class="dark"` on `<html>` at server render, so there is no
+flash. `/login` is public and wrapped by the same layout, so it is themed pre-auth
+with no middleware change. The toggle lives only in `TopNav` (authed chrome); the
+login page has no toggle, matching the SPEC wording ("toggle in the top navigation").
+
+### D95: Focus rings via a global focus-visible outline plus explicit rings on rows
+
+A base rule in `globals.css` gives every interactive element (and `[tabindex]`) a
+`focus-visible` outline in the `focus` color, so focus is visible everywhere in both
+themes without editing every element. The keyboard-driven approval rows in
+`ImportPanel` and `BibleImportPanel` additionally carry
+`focus-visible:ring-2 focus-visible:ring-focus` (their old `focus:border-neutral-500
+focus:outline-none` recipe was replaced), and `LockPanel`'s `tabindex` rows rely on
+the global outline. This satisfies the SPEC requirement that the approval checklists
+show focus clearly.
+
+### D96: Reading measure bounded at 70ch on the draft and review surfaces
+
+The draft textarea and review prose get `max-w-[70ch]` plus `bg-surface` and
+`text-ink`, so long chapters read at a comfortable measure on wide screens. Chat
+already sits in a `max-w-2xl` column. Empty states for canon, characters, chapters,
+and comments were warmed from bare gray one-liners to a sentence plus the obvious
+next action; all `data-testid` and aria labels are byte-identical so the e2e suite
+is undisturbed.
+
+### D97: Favicon is an inline SVG data URI, not a served file
+
+A minimal book glyph is inlined as a `data:image/svg+xml` URI in the layout
+`metadata.icons`, so it needs no network request and is not gated by middleware on
+the pre-auth login page (a served `/icon.svg` route would 302 to `/login`).
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

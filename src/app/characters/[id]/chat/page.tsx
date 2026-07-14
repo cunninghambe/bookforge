@@ -32,18 +32,18 @@ export default async function CharacterChatPage({
       <TopNav active="characters" />
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">Chat with {character.name}</h1>
-        <Link href="/characters" className="text-sm text-neutral-500 hover:underline">
+        <Link href="/characters" className="text-sm text-muted hover:underline">
           Back to characters
         </Link>
       </div>
-      <p className="mb-2 text-sm text-neutral-500">
+      <p className="mb-2 text-sm text-muted">
         Audition dialogue and test voice. {character.name} answers pinned to a
         moment in the book, knowing only what they knew then. Nothing said here is
         saved or enters canon, except a reply you explicitly propose as a
         provisional fact.
       </p>
       <Suspense
-        fallback={<p className="mt-4 text-sm text-neutral-400">Loading chat...</p>}
+        fallback={<p className="mt-4 text-sm text-faint">Loading chat...</p>}
       >
         <CharacterChat
           characterId={character.id}

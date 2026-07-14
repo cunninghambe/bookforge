@@ -269,7 +269,7 @@ export function ReviewEditor({
         {error && (
           <div
             data-testid="review-error"
-            className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+            className="mb-3 rounded border border-danger-edge bg-danger px-3 py-2 text-sm text-danger-ink"
           >
             {error}
           </div>
@@ -277,7 +277,7 @@ export function ReviewEditor({
         {savedVersion && (
           <div
             data-testid="revision-saved"
-            className="mb-3 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
+            className="mb-3 rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
           >
             Saved as a new draft version.
           </div>
@@ -286,24 +286,24 @@ export function ReviewEditor({
         <div
           ref={proseRef}
           data-testid="review-prose"
-          className="whitespace-pre-wrap rounded border border-neutral-300 p-4 font-serif text-[15px] leading-relaxed"
+          className="max-w-[70ch] whitespace-pre-wrap rounded border border-edge bg-surface p-4 font-serif text-[15px] leading-relaxed text-ink"
         >
           {content}
         </div>
 
-        <div className="mt-3 rounded border border-neutral-200 p-3">
-          <p className="mb-2 text-xs uppercase tracking-wide text-neutral-400">
+        <div className="mt-3 rounded border border-edge-soft p-3">
+          <p className="mb-2 text-xs uppercase tracking-wide text-faint">
             Selected span
           </p>
           {pending ? (
             <p
               data-testid="selected-span"
-              className="mb-2 rounded bg-amber-50 px-2 py-1 text-sm text-amber-900"
+              className="mb-2 rounded bg-warn px-2 py-1 text-sm text-warn-ink"
             >
               {pending.quotedText}
             </p>
           ) : (
-            <p className="mb-2 text-sm text-neutral-400">
+            <p className="mb-2 text-sm text-faint">
               Select text above to attach a comment.
             </p>
           )}
@@ -313,14 +313,14 @@ export function ReviewEditor({
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             rows={2}
-            className="w-full rounded border border-neutral-300 p-2 text-sm"
+            className="w-full rounded border border-edge p-2 text-sm"
             placeholder="What should change about this span?"
           />
           <button
             data-testid="add-comment-button"
             onClick={addComment}
             disabled={!pending || commentText.trim().length === 0}
-            className="mt-2 rounded bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            className="mt-2 rounded bg-accent hover:bg-accent-hover px-3 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             Add comment
           </button>
@@ -329,7 +329,7 @@ export function ReviewEditor({
         {revising && (
           <div
             data-testid="revision-in-progress"
-            className="mt-4 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800"
+            className="mt-4 rounded border border-info-edge bg-info px-3 py-2 text-sm text-info-ink"
           >
             Revising in patch mode. Applying the smallest set of changes...
           </div>
@@ -339,14 +339,14 @@ export function ReviewEditor({
           <div className="mt-4" data-testid="revision-panel">
             <div
               data-testid="revision-mode"
-              className="mb-3 inline-block rounded border border-neutral-300 bg-neutral-50 px-2 py-0.5 text-xs uppercase tracking-wide text-neutral-600"
+              className="mb-3 inline-block rounded border border-edge bg-inset px-2 py-0.5 text-xs uppercase tracking-wide text-muted"
             >
               {revision.mode === "patch" ? "patch revision" : "full revision"}
             </div>
             {revision.failedPatches.length > 0 && (
               <div
                 data-testid="failed-patches"
-                className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"
+                className="mb-3 rounded border border-warn-edge bg-warn p-3 text-sm text-warn-ink"
               >
                 <p className="mb-2 font-medium">
                   {revision.failedPatches.length} patch
@@ -359,18 +359,18 @@ export function ReviewEditor({
                     <li
                       key={i}
                       data-testid={`failed-patch-${i}`}
-                      className="rounded border border-amber-200 bg-white p-2"
+                      className="rounded border border-warn-edge bg-surface p-2"
                     >
-                      <p className="text-xs uppercase text-neutral-400">
+                      <p className="text-xs uppercase text-faint">
                         {p.reason}
                         {p.isConsistencyFix ? " (consistency fix)" : ""}
                       </p>
-                      <p className="mt-1 text-neutral-700">
-                        <span className="text-neutral-400">original: </span>
+                      <p className="mt-1 text-ink">
+                        <span className="text-faint">original: </span>
                         {p.original}
                       </p>
-                      <p className="text-neutral-700">
-                        <span className="text-neutral-400">replacement: </span>
+                      <p className="text-ink">
+                        <span className="text-faint">replacement: </span>
                         {p.replacement}
                       </p>
                     </li>
@@ -381,7 +381,7 @@ export function ReviewEditor({
             {revision.retried && (
               <div
                 data-testid="revision-retry-alert"
-                className="mb-3 rounded border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800"
+                className="mb-3 rounded border border-info-edge bg-info px-3 py-2 text-sm text-info-ink"
               >
                 An em-dash was detected and the revision was regenerated without it.
               </div>
@@ -389,7 +389,7 @@ export function ReviewEditor({
             {revision.emDashUnresolved && (
               <div
                 data-testid="revision-emdash-unresolved"
-                className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                className="mb-3 rounded border border-warn-edge bg-warn px-3 py-2 text-sm text-warn-ink"
               >
                 The regenerated revision still contains an em-dash. Edit it out
                 before saving.
@@ -398,9 +398,9 @@ export function ReviewEditor({
             {unauthorized.length > 0 ? (
               <div
                 data-testid="unauthorized-panel"
-                className="rounded border border-amber-300 bg-amber-50 p-3"
+                className="rounded border border-warn-edge bg-warn p-3"
               >
-                <p className="mb-2 font-medium text-amber-900">
+                <p className="mb-2 font-medium text-warn-ink">
                   {unauthorized.length} unauthorized change
                   {unauthorized.length === 1 ? "" : "s"} detected. Resolve each
                   before saving.
@@ -410,27 +410,27 @@ export function ReviewEditor({
                     <li
                       key={h.index}
                       data-testid={`hunk-${h.index}`}
-                      className="rounded border border-amber-200 bg-white p-2 text-sm"
+                      className="rounded border border-warn-edge bg-surface p-2 text-sm"
                     >
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <p className="mb-1 text-xs uppercase text-neutral-400">
+                          <p className="mb-1 text-xs uppercase text-faint">
                             Original
                           </p>
                           <p
                             data-testid={`hunk-old-${h.index}`}
-                            className="whitespace-pre-wrap text-neutral-700"
+                            className="whitespace-pre-wrap text-ink"
                           >
                             {h.oldText}
                           </p>
                         </div>
                         <div>
-                          <p className="mb-1 text-xs uppercase text-neutral-400">
+                          <p className="mb-1 text-xs uppercase text-faint">
                             Revised
                           </p>
                           <p
                             data-testid={`hunk-new-${h.index}`}
-                            className="whitespace-pre-wrap text-neutral-700"
+                            className="whitespace-pre-wrap text-ink"
                           >
                             {h.newText}
                           </p>
@@ -442,8 +442,8 @@ export function ReviewEditor({
                           onClick={() => decide(h.index, "accept")}
                           className={`rounded border px-2 py-1 text-xs ${
                             decisions[h.index] === "accept"
-                              ? "border-green-500 bg-green-100 text-green-800"
-                              : "border-neutral-300"
+                              ? "border-ok-strong bg-ok-chip text-ok-ink"
+                              : "border-edge"
                           }`}
                         >
                           Accept
@@ -453,8 +453,8 @@ export function ReviewEditor({
                           onClick={() => decide(h.index, "reject")}
                           className={`rounded border px-2 py-1 text-xs ${
                             decisions[h.index] === "reject"
-                              ? "border-red-500 bg-red-100 text-red-800"
-                              : "border-neutral-300"
+                              ? "border-danger-strong bg-danger-chip text-danger-ink"
+                              : "border-edge"
                           }`}
                         >
                           Reject (restore original)
@@ -462,7 +462,7 @@ export function ReviewEditor({
                         {decisions[h.index] && (
                           <span
                             data-testid={`hunk-decided-${h.index}`}
-                            className="text-xs text-neutral-500"
+                            className="text-xs text-muted"
                           >
                             {decisions[h.index]}
                           </span>
@@ -475,14 +475,14 @@ export function ReviewEditor({
             ) : (
               <div
                 data-testid="no-unauthorized"
-                className="rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
+                className="rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
               >
                 No unauthorized changes. Every change is within a flagged span or a
                 declared consistency fix.
               </div>
             )}
 
-            <div className="mt-3 text-xs text-neutral-500" data-testid="authorized-summary">
+            <div className="mt-3 text-xs text-muted" data-testid="authorized-summary">
               {authorizedOrDeclared.length} authorized or declared change
               {authorizedOrDeclared.length === 1 ? "" : "s"} will be kept.
             </div>
@@ -491,7 +491,7 @@ export function ReviewEditor({
               data-testid="save-revision-button"
               onClick={saveRevision}
               disabled={!allResolved || saving}
-              className="mt-3 rounded bg-neutral-900 px-4 py-1.5 text-white disabled:opacity-50"
+              className="mt-3 rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-accent-ink disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save revision as new version"}
             </button>
@@ -500,13 +500,13 @@ export function ReviewEditor({
       </div>
 
       <aside className="text-sm">
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-neutral-400">
+        <h2 className="mb-2 text-xs uppercase tracking-wide text-faint">
           Comments
         </h2>
         <ul className="space-y-2" data-testid="comment-list">
           {comments.length === 0 && (
-            <li className="text-neutral-400" data-testid="no-comments">
-              No comments yet.
+            <li className="text-muted" data-testid="no-comments">
+              No comments yet. Select a span in the prose to flag what should change.
             </li>
           )}
           {comments.map((c) => (
@@ -515,21 +515,21 @@ export function ReviewEditor({
               data-testid={`comment-${c.id}`}
               className={`rounded border p-2 ${
                 c.resolved
-                  ? "border-neutral-200 bg-neutral-50 text-neutral-400"
-                  : "border-neutral-300"
+                  ? "border-edge-soft bg-inset text-faint"
+                  : "border-edge"
               }`}
             >
-              <p className="mb-1 text-xs italic text-neutral-500">
+              <p className="mb-1 text-xs italic text-muted">
                 &ldquo;{c.quotedText}&rdquo;
               </p>
               <p className="mb-1">{c.comment}</p>
               {c.resolved ? (
-                <span className="text-xs text-green-600">resolved</span>
+                <span className="text-xs text-ok-ink">resolved</span>
               ) : (
                 <button
                   data-testid={`resolve-comment-${c.id}`}
                   onClick={() => resolveComment(c.id)}
-                  className="rounded border border-neutral-300 px-2 py-0.5 text-xs"
+                  className="rounded border border-edge px-2 py-0.5 text-xs"
                 >
                   Resolve
                 </button>
@@ -542,12 +542,12 @@ export function ReviewEditor({
           data-testid="revise-button"
           onClick={revise}
           disabled={revising || unresolvedCount === 0}
-          className="mt-4 w-full rounded bg-neutral-900 px-3 py-2 text-white disabled:opacity-50"
+          className="mt-4 w-full rounded bg-accent hover:bg-accent-hover px-3 py-2 text-accent-ink disabled:opacity-50"
         >
           {revising ? "Revising..." : "Revise flagged spans"}
         </button>
         {unresolvedCount === 0 && (
-          <p className="mt-1 text-xs text-neutral-400">
+          <p className="mt-1 text-xs text-faint">
             Add at least one unresolved comment to revise.
           </p>
         )}

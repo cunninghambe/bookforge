@@ -30,7 +30,7 @@ export default async function DraftPage({
         <h1 className="font-serif text-xl">
           {project.title}: {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>
-        <div className="flex gap-4 text-sm text-neutral-500">
+        <div className="flex gap-4 text-sm text-muted">
           <Link href={`/book/${project.id}`} className="hover:underline">
             Back to book
           </Link>
@@ -49,7 +49,7 @@ export default async function DraftPage({
           </Link>
         </div>
       </div>
-      <Suspense fallback={<p className="mt-4 text-sm text-neutral-400">Loading editor...</p>}>
+      <Suspense fallback={<p className="mt-4 text-sm text-faint">Loading editor...</p>}>
         <DraftEditor
           chapterId={chapter.id}
           beats={chapter.beats}

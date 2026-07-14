@@ -33,12 +33,12 @@ export default async function SweepPage({
         <h1 className="font-serif text-xl">Consistency sweep: {project.title}</h1>
         <Link
           href={`/book/${project.id}`}
-          className="text-sm text-neutral-500 hover:underline"
+          className="text-sm text-muted hover:underline"
         >
           Back to book
         </Link>
       </div>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         Checks each locked chapter against the full locked canon and reports
         contradictions only. One model call per chapter, run in order. This is slow
         and costs tokens, so pick a range.

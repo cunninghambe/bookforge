@@ -83,10 +83,12 @@ export function CanonManager({ projects }: { projects: Project[] }) {
 
       <AddForm projects={projects} onCreated={load} />
 
-      <ul className="mt-4 divide-y divide-neutral-200" data-testid="canon-list">
-        {loading && <li className="py-3 text-sm text-neutral-400">Loading...</li>}
+      <ul className="mt-4 divide-y divide-edge-soft" data-testid="canon-list">
+        {loading && <li className="py-3 text-sm text-faint">Loading...</li>}
         {!loading && facts.length === 0 && (
-          <li className="py-3 text-sm text-neutral-400">No facts match.</li>
+          <li className="py-6 text-sm text-muted">
+            Nothing here yet. Add a fact above, or loosen the filters to see more.
+          </li>
         )}
         {facts.map((f) => (
           <CanonRow
@@ -113,14 +115,14 @@ function FilterBar(props: {
   onScope: (v: string) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded border border-neutral-200 bg-white p-3 text-sm">
+    <div className="flex flex-wrap items-center gap-3 rounded border border-edge-soft bg-surface p-3 text-sm">
       <label className="flex items-center gap-1">
         Type
         <select
           aria-label="Filter by type"
           value={props.filterType}
           onChange={(e) => props.onType(e.target.value)}
-          className="rounded border border-neutral-300 px-2 py-1"
+          className="rounded border border-edge px-2 py-1"
         >
           <option value="all">all</option>
           {TYPES.map((t) => (
@@ -136,7 +138,7 @@ function FilterBar(props: {
           aria-label="Filter by status"
           value={props.filterStatus}
           onChange={(e) => props.onStatus(e.target.value)}
-          className="rounded border border-neutral-300 px-2 py-1"
+          className="rounded border border-edge px-2 py-1"
         >
           <option value="all">all</option>
           {STATUSES.map((s) => (
@@ -152,7 +154,7 @@ function FilterBar(props: {
           aria-label="Filter by scope"
           value={props.filterScope}
           onChange={(e) => props.onScope(e.target.value)}
-          className="rounded border border-neutral-300 px-2 py-1"
+          className="rounded border border-edge px-2 py-1"
         >
           <option value="all">all</option>
           <option value="series">series-wide</option>
@@ -207,7 +209,7 @@ function AddForm({
         aria-label="New fact type"
         value={type}
         onChange={(e) => setType(e.target.value as CanonType)}
-        className="rounded border border-neutral-300 px-2 py-1"
+        className="rounded border border-edge px-2 py-1"
       >
         {TYPES.map((t) => (
           <option key={t} value={t}>
@@ -220,13 +222,13 @@ function AddForm({
         placeholder="Add a fact and press Enter"
         value={content}
         onChange={(e) => setContent(e.target.value)}
-        className="min-w-[20rem] flex-1 rounded border border-neutral-300 px-2 py-1"
+        className="min-w-[20rem] flex-1 rounded border border-edge px-2 py-1"
       />
       <select
         aria-label="New fact scope"
         value={scope}
         onChange={(e) => setScope(e.target.value)}
-        className="rounded border border-neutral-300 px-2 py-1"
+        className="rounded border border-edge px-2 py-1"
       >
         <option value="series">series-wide</option>
         {projects.map((p) => (
@@ -238,7 +240,7 @@ function AddForm({
       <button
         type="submit"
         disabled={busy}
-        className="rounded bg-neutral-900 px-3 py-1 text-white disabled:opacity-50"
+        className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-accent-ink disabled:opacity-50"
       >
         Add
       </button>
@@ -282,7 +284,7 @@ function CanonRow({
       data-status={fact.status}
       data-type={fact.type}
     >
-      <span className="mt-0.5 w-20 shrink-0 text-xs uppercase tracking-wide text-neutral-400">
+      <span className="mt-0.5 w-20 shrink-0 text-xs uppercase tracking-wide text-faint">
         {TYPE_LABEL[fact.type]}
       </span>
       <div className="flex-1">
@@ -292,14 +294,14 @@ function CanonRow({
               aria-label="Edit fact content"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              className="flex-1 rounded border border-neutral-300 px-2 py-1"
+              className="flex-1 rounded border border-edge px-2 py-1"
             />
             <button
               onClick={async () => {
                 await patch({ content: draft });
                 setEditing(false);
               }}
-              className="rounded bg-neutral-900 px-2 py-1 text-white"
+              className="rounded bg-accent hover:bg-accent-hover px-2 py-1 text-accent-ink"
             >
               Save
             </button>
@@ -308,7 +310,7 @@ function CanonRow({
                 setDraft(fact.content);
                 setEditing(false);
               }}
-              className="rounded border border-neutral-300 px-2 py-1"
+              className="rounded border border-edge px-2 py-1"
             >
               Cancel
             </button>
@@ -323,7 +325,7 @@ function CanonRow({
             {fact.content}
           </span>
         )}
-        <div className="mt-1 flex items-center gap-2 text-xs text-neutral-400">
+        <div className="mt-1 flex items-center gap-2 text-xs text-faint">
           <span>{scopeLabel}</span>
           <span>&middot;</span>
           <span data-testid="row-status">{fact.status}</span>
@@ -339,7 +341,7 @@ function CanonRow({
         {!editing && !locked && !retired && (
           <button
             onClick={() => setEditing(true)}
-            className="text-neutral-500 hover:underline"
+            className="text-muted hover:underline"
           >
             Edit
           </button>
@@ -347,7 +349,7 @@ function CanonRow({
         {locked ? (
           <button
             onClick={() => patch({ status: "provisional" })}
-            className="text-neutral-500 hover:underline"
+            className="text-muted hover:underline"
           >
             Unlock
           </button>
@@ -355,7 +357,7 @@ function CanonRow({
           !retired && (
             <button
               onClick={() => patch({ status: "locked" })}
-              className="text-neutral-500 hover:underline"
+              className="text-muted hover:underline"
             >
               Lock
             </button>
@@ -364,19 +366,19 @@ function CanonRow({
         {!retired ? (
           <button
             onClick={() => patch({ status: "retired" })}
-            className="text-neutral-500 hover:underline"
+            className="text-muted hover:underline"
           >
             Retire
           </button>
         ) : (
           <button
             onClick={() => patch({ status: "provisional" })}
-            className="text-neutral-500 hover:underline"
+            className="text-muted hover:underline"
           >
             Restore
           </button>
         )}
-        <button onClick={remove} className="text-red-500 hover:underline">
+        <button onClick={remove} className="text-danger-ink hover:underline">
           Delete
         </button>
       </div>
@@ -417,10 +419,10 @@ function BulkPaste({
   }
 
   return (
-    <div className="mt-8 border-t border-neutral-200 pt-4">
+    <div className="mt-8 border-t border-edge-soft pt-4">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="text-sm text-neutral-500 hover:underline"
+        className="text-sm text-muted hover:underline"
       >
         {open ? "Hide bulk paste" : "Bulk paste facts"}
       </button>
@@ -431,7 +433,7 @@ function BulkPaste({
               aria-label="Bulk type"
               value={type}
               onChange={(e) => setType(e.target.value as CanonType)}
-              className="rounded border border-neutral-300 px-2 py-1"
+              className="rounded border border-edge px-2 py-1"
             >
               {TYPES.map((t) => (
                 <option key={t} value={t}>
@@ -443,7 +445,7 @@ function BulkPaste({
               aria-label="Bulk scope"
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              className="rounded border border-neutral-300 px-2 py-1"
+              className="rounded border border-edge px-2 py-1"
             >
               <option value="series">series-wide</option>
               {projects.map((p) => (
@@ -452,7 +454,7 @@ function BulkPaste({
                 </option>
               ))}
             </select>
-            <span className="text-neutral-400">
+            <span className="text-faint">
               one fact per line, created provisional
             </span>
           </div>
@@ -461,12 +463,12 @@ function BulkPaste({
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={6}
-            className="w-full rounded border border-neutral-300 px-2 py-1 font-mono"
+            className="w-full rounded border border-edge px-2 py-1 font-mono"
           />
           <button
             onClick={submit}
             disabled={busy}
-            className="rounded bg-neutral-900 px-3 py-1 text-white disabled:opacity-50"
+            className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-accent-ink disabled:opacity-50"
           >
             Create all
           </button>

@@ -12,7 +12,7 @@ export default function CharactersPage() {
     <main>
       <TopNav active="characters" />
       <h1 className="mt-6 font-serif text-xl">Characters</h1>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         Cards carry durable fields. Expand a card to see the state timeline: what
         each character knows, feels, and is hiding, effective from a given chapter.
       </p>

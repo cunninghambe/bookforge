@@ -34,7 +34,7 @@ export default async function ReviewPage({
           Review: {project.title}:{" "}
           {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>
-        <div className="flex gap-4 text-sm text-neutral-500">
+        <div className="flex gap-4 text-sm text-muted">
           <Link href={`/book/${project.id}`} className="hover:underline">
             Back to book
           </Link>
@@ -64,7 +64,7 @@ export default async function ReviewPage({
           characters={characters}
         />
       ) : (
-        <p className="mt-6 text-sm text-neutral-500" data-testid="no-draft">
+        <p className="mt-6 text-sm text-muted" data-testid="no-draft">
           This chapter has no draft yet. Draft it first.
         </p>
       )}

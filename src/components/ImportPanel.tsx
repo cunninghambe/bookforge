@@ -299,7 +299,7 @@ export function ImportPanel({
   return (
     <div>
       <p
-        className="mb-3 text-xs uppercase tracking-wide text-neutral-500"
+        className="mb-3 text-xs uppercase tracking-wide text-muted"
         data-testid="import-count"
       >
         Imported this session: {importedCount}
@@ -308,29 +308,29 @@ export function ImportPanel({
       {error && (
         <div
           data-testid="import-error"
-          className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+          className="mb-3 rounded border border-danger-edge bg-danger px-3 py-2 text-sm text-danger-ink"
         >
           {error}
         </div>
       )}
 
       <div
-        className="rounded border border-neutral-200 bg-neutral-50 p-3"
+        className="rounded border border-edge-soft bg-inset p-3"
         data-testid="import-form"
       >
         <label className="mb-2 flex flex-col gap-1 text-sm">
-          <span className="text-xs uppercase text-neutral-400">Title</span>
+          <span className="text-xs uppercase text-faint">Title</span>
           <input
             ref={titleRef}
             data-testid="import-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={hasResult || busy}
-            className="rounded border border-neutral-300 px-2 py-1"
+            className="rounded border border-edge px-2 py-1"
           />
         </label>
         <label className="mb-2 flex flex-col gap-1 text-sm">
-          <span className="text-xs uppercase text-neutral-400">
+          <span className="text-xs uppercase text-faint">
             Position (1 = first, {chapterCount + 1} = last)
           </span>
           <input
@@ -341,18 +341,18 @@ export function ImportPanel({
             max={chapterCount + 1}
             onChange={(e) => setPosition(Number(e.target.value))}
             disabled={hasResult || busy}
-            className="w-24 rounded border border-neutral-300 px-2 py-1"
+            className="w-24 rounded border border-edge px-2 py-1"
           />
         </label>
         <label className="mb-2 flex flex-col gap-1 text-sm">
-          <span className="text-xs uppercase text-neutral-400">Chapter text</span>
+          <span className="text-xs uppercase text-faint">Chapter text</span>
           <textarea
             data-testid="import-content"
             value={content}
             onChange={(e) => setContent(e.target.value)}
             disabled={hasResult || busy}
             rows={10}
-            className="rounded border border-neutral-300 p-2 font-serif text-sm"
+            className="rounded border border-edge p-2 font-serif text-sm"
             placeholder="Paste the chapter text here."
           />
         </label>
@@ -362,7 +362,7 @@ export function ImportPanel({
             data-testid="import-button"
             onClick={importChapter}
             disabled={busy || !title.trim() || !content.trim()}
-            className="rounded bg-neutral-900 px-4 py-1.5 text-sm text-white disabled:opacity-50"
+            className="rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             {busy ? "Importing..." : "Import chapter"}
           </button>
@@ -370,7 +370,7 @@ export function ImportPanel({
           <button
             data-testid="import-finish-button"
             onClick={finishChapter}
-            className="rounded bg-neutral-900 px-4 py-1.5 text-sm text-white"
+            className="rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink"
           >
             Done, next chapter
           </button>
@@ -379,12 +379,12 @@ export function ImportPanel({
 
       {summary && (
         <div className="mt-3">
-          <p className="text-xs uppercase tracking-wide text-neutral-400">
+          <p className="text-xs uppercase tracking-wide text-faint">
             Chapter summary
           </p>
           <p
             data-testid="import-summary"
-            className="mt-1 rounded border border-neutral-200 bg-white p-2 text-sm text-neutral-700"
+            className="mt-1 rounded border border-edge-soft bg-surface p-2 text-sm text-ink"
           >
             {summary}
           </p>
@@ -394,7 +394,7 @@ export function ImportPanel({
       {approved && (
         <div
           data-testid="import-approve-success"
-          className="mt-3 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
+          className="mt-3 rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
         >
           Approved {approved.facts} fact(s) and {approved.states} state(s).
         </div>
@@ -402,12 +402,12 @@ export function ImportPanel({
 
       {extractionRaw !== null && (
         <div className="mt-3">
-          <p className="text-xs uppercase tracking-wide text-amber-700">
+          <p className="text-xs uppercase tracking-wide text-warn-ink">
             Extraction did not parse. Raw model output:
           </p>
           <pre
             data-testid="import-extraction-raw"
-            className="mt-1 overflow-x-auto rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+            className="mt-1 overflow-x-auto rounded border border-warn-edge bg-warn p-2 text-xs text-warn-ink"
           >
             {extractionRaw}
           </pre>
@@ -416,7 +416,7 @@ export function ImportPanel({
 
       {(facts !== null || states !== null) && extractionRaw === null && (
         <div className="mt-4" data-testid="import-extraction-panel">
-          <p className="mb-2 text-xs uppercase tracking-wide text-neutral-500">
+          <p className="mb-2 text-xs uppercase tracking-wide text-muted">
             Proposals (nothing is added until you approve). Arrows move between
             rows, a approves, r rejects.
           </p>
@@ -424,7 +424,7 @@ export function ImportPanel({
           <ul className="space-y-2" data-testid="import-fact-proposals">
             {factsLen === 0 && (
               <li
-                className="text-xs text-neutral-400"
+                className="text-xs text-faint"
                 data-testid="import-no-fact-proposals"
               >
                 No fact proposals.
@@ -437,7 +437,7 @@ export function ImportPanel({
                 data-testid={`import-fact-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => onFactKeyDown(e, i)}
-                className="rounded border border-neutral-200 bg-white p-2 text-sm focus:border-neutral-500 focus:outline-none"
+                className="rounded border border-edge-soft bg-surface p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:border-edge"
               >
                 <label className="flex items-start gap-2">
                   <input
@@ -456,12 +456,12 @@ export function ImportPanel({
                     className="mt-1"
                   />
                   <span className="flex-1">
-                    <span className="mr-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs uppercase text-neutral-500">
+                    <span className="mr-2 rounded bg-chip px-1.5 py-0.5 text-xs uppercase text-muted">
                       {f.type.replace("_", " ")}
                     </span>
                     {f.content}
                     {f.evidenceQuote && (
-                      <span className="mt-1 block text-xs italic text-neutral-400">
+                      <span className="mt-1 block text-xs italic text-faint">
                         evidence: &ldquo;{f.evidenceQuote}&rdquo;
                       </span>
                     )}
@@ -474,7 +474,7 @@ export function ImportPanel({
           <ul className="mt-3 space-y-2" data-testid="import-state-proposals">
             {statesLen === 0 && (
               <li
-                className="text-xs text-neutral-400"
+                className="text-xs text-faint"
                 data-testid="import-no-state-proposals"
               >
                 No character-state proposals.
@@ -487,7 +487,7 @@ export function ImportPanel({
                 data-testid={`import-state-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => onStateKeyDown(e, i)}
-                className="rounded border border-neutral-200 bg-white p-2 text-sm focus:border-neutral-500 focus:outline-none"
+                className="rounded border border-edge-soft bg-surface p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:border-edge"
               >
                 <label className="flex items-start gap-2">
                   <input
@@ -510,7 +510,7 @@ export function ImportPanel({
                     {s.characterId === null && (
                       <span
                         data-testid={`import-state-unmatched-${i}`}
-                        className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
+                        className="ml-2 rounded bg-warn-chip px-1.5 py-0.5 text-xs text-warn-ink"
                       >
                         unmatched: map or create before approving
                       </span>
@@ -568,7 +568,7 @@ export function ImportPanel({
                               : p,
                           )
                         }
-                        className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                        className="rounded border border-edge px-2 py-1 text-xs"
                       >
                         <option value="">(map to character)</option>
                         {chars.map((c) => (
@@ -581,7 +581,7 @@ export function ImportPanel({
                         <button
                           data-testid={`import-state-create-${i}`}
                           onClick={() => createCharacterInline(s.character, i)}
-                          className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                          className="rounded border border-edge px-2 py-1 text-xs"
                         >
                           Create &ldquo;{s.character}&rdquo;
                         </button>
@@ -597,7 +597,7 @@ export function ImportPanel({
             data-testid="import-approve-button"
             onClick={approveChecked}
             disabled={busy}
-            className="mt-3 rounded bg-neutral-900 px-4 py-1.5 text-sm text-white disabled:opacity-50"
+            className="mt-3 rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             Approve checked proposals
           </button>
@@ -620,13 +620,13 @@ function ImportStateField({
 }) {
   return (
     <span className="flex items-center gap-2">
-      <span className="w-12 text-xs uppercase text-neutral-400">{label}</span>
+      <span className="w-12 text-xs uppercase text-faint">{label}</span>
       <input
         aria-label={label}
         data-testid={testid}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 rounded border border-neutral-300 px-2 py-1 text-xs"
+        className="flex-1 rounded border border-edge px-2 py-1 text-xs"
       />
     </span>
   );

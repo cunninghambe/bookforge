@@ -21,7 +21,7 @@ export default async function BookPage({
       <TopNav active="books" />
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">{project.title}</h1>
-        <div className="flex gap-4 text-sm text-neutral-500">
+        <div className="flex gap-4 text-sm text-muted">
           <Link
             href={`/book/${project.id}/import`}
             data-testid="import-link"
@@ -46,7 +46,7 @@ export default async function BookPage({
           </a>
         </div>
       </div>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         Order the chapters, set synopsis and beats, then interrogate a chapter to
         lock its decisions before drafting.
       </p>

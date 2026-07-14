@@ -1426,3 +1426,61 @@ verbatim passthrough); it was not run in this fixture-only automated loop.
   the loop stays fixture-only.
 - D89: the A8 e2e reuses the dev llm-calls readback and the fixture draft flow, and
   resets its own override so it leaves no global settings state.
+
+---
+
+## Amendment A9: Design pass with dark mode
+
+Status: COMPLETE. 250 unit tests and 36 e2e tests pass; tsc clean; the repo token
+check passes.
+
+### What was built
+
+- Theme mechanics. A quiet `data-testid="theme-toggle"` button in `TopNav`
+  (`src/components/ThemeToggle.tsx`) flips the `dark` class on `<html>` immediately
+  and writes a plain, year-long `bookforge_theme` cookie (path=/, not httpOnly).
+  The root layout (`src/app/layout.tsx`, now `async`) reads that cookie with
+  `next/headers` `cookies()` and stamps `class="dark"` at server render, so there
+  is no flash. `/login` is themed pre-auth through the same layout with no
+  middleware change. `tailwind.config.ts` gained `darkMode: "class"`.
+- Token system. Semantic colors live once in `src/app/globals.css` as `R G B`
+  triplet CSS variables (light on `:root`, dark on `.dark`) and are mapped into the
+  Tailwind palette in `tailwind.config.ts`. Vocabulary: `paper`, `surface`,
+  `inset`, `chip`, `ink`, `muted`, `faint`, `edge`/`edge-soft`,
+  `accent`/`accent-ink`/`accent-hover`, `focus`, and the alert families `warn`,
+  `info`, `danger`, `ok` (each `DEFAULT`/`ink`/`edge`/`chip`; `danger`/`ok` add
+  `strong`). Light keeps warm paper; dark is warm dark gray (never pure black) with
+  off-white ink, full contrast on reading surfaces and reduced contrast on chrome.
+- Sweep to tokens. `scripts/a9-migrate.mjs` applied deterministic 1:1 class swaps
+  across every page and component; no raw `bg-white` / `bg-neutral-*` /
+  `border-neutral-*` / `text-neutral-*` / amber / sky / red / green classes remain.
+  All `data-testid` and aria labels are byte-identical.
+- Polish. Button hierarchy as consistent recipes (primary/secondary/quiet/
+  destructive), also exposed as `.btn-*` classes; a global `focus-visible` outline
+  in the `focus` color plus explicit rings on the keyboard-driven approval rows;
+  subtle transitions on hover/focus/theme only; 70ch bounded measure on the draft
+  and review reading surfaces; warmer empty states (canon, characters, chapters,
+  comments) with a next action; a minimal book-glyph favicon inlined as an SVG data
+  URI in the layout metadata.
+
+### Tests
+
+- New unit repo check `tests/unit/a9-tokens.test.ts`: scans every `.tsx` under
+  `src/app` and `src/components` and fails on any forbidden raw palette class.
+- New e2e `tests/e2e/a9.spec.ts`: the toggle flips the html class and persists
+  across reload and a navigation; a themed `page.request.get` of `/` and `/login`
+  returns raw HTML that already carries `class="dark"` (no-flash assertion).
+- `npm run ui-shots` (`scripts/ui-shots.mjs`) logs in, seeds a fact, a character
+  with a state, and a chapter with a short draft, then captures both themes of
+  login, home, canon, characters, chat (pinned), sequencer, draft, review, and
+  settings into `./ui-shots/`. `ui-shots/` is gitignored.
+- Counts: unit 222 to 250 (+28), e2e 34 to 36 (+2). tsc clean.
+
+### Judgment calls
+
+See D90 through D97 in DECISIONS.md. Key ones: tokens are RGB triplets so opacity
+modifiers work (D90); the accent is a monochrome light/dark inversion, no new hue
+(D91); the migration was scripted for auditability (D93); the theme cookie is plain
+and read server-side (D94); focus is a global focus-visible outline plus explicit
+rings on the approval rows (D95); the favicon is an inline data URI so it is not
+gated by middleware on the login page (D97).

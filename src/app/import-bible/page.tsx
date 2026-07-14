@@ -27,11 +27,11 @@ export default function ImportBiblePage() {
       <TopNav active="books" />
       <div className="mt-6 flex items-baseline justify-between">
         <h1 className="font-serif text-xl">Import series bible</h1>
-        <Link href="/" className="text-sm text-neutral-500 hover:underline">
+        <Link href="/" className="text-sm text-muted hover:underline">
           Back to books
         </Link>
       </div>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         Paste the story bible: the accumulated world rules, character sheets,
         timeline notes, and standing decisions that never lived in any chapter.
         Choose a scope, then approve the proposals one at a time. Nothing lands

@@ -68,12 +68,12 @@ export function Sequencer({ projectId }: { projectId: number }) {
           placeholder="New chapter title"
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
-          className="min-w-[20rem] flex-1 rounded border border-neutral-300 px-2 py-1"
+          className="min-w-[20rem] flex-1 rounded border border-edge px-2 py-1"
         />
         <button
           type="submit"
           data-testid="add-chapter-button"
-          className="rounded bg-neutral-900 px-3 py-1 text-white"
+          className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-accent-ink"
         >
           + Add chapter
         </button>
@@ -91,7 +91,9 @@ export function Sequencer({ projectId }: { projectId: number }) {
           />
         ))}
         {chapters.length === 0 && (
-          <li className="text-sm text-neutral-400">No chapters yet.</li>
+          <li className="py-4 text-sm text-muted">
+            No chapters yet. Add the first one above to start sequencing the book.
+          </li>
         )}
       </ol>
     </div>
@@ -102,7 +104,7 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span
       data-testid="status-pill"
-      className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs uppercase tracking-wide text-neutral-500"
+      className="rounded-full bg-chip px-2 py-0.5 text-xs uppercase tracking-wide text-muted"
     >
       {status}
     </span>
@@ -125,7 +127,7 @@ function ChapterRow({
   const [expanded, setExpanded] = useState(false);
   return (
     <li
-      className="rounded border border-neutral-200 bg-white p-3"
+      className="rounded border border-edge-soft bg-surface p-3"
       data-testid="chapter-row"
       data-chapter-id={chapter.id}
       data-status={chapter.status}
@@ -137,7 +139,7 @@ function ChapterRow({
             data-testid="move-up"
             disabled={index === 0}
             onClick={() => onMove(index, -1)}
-            className="text-xs text-neutral-400 disabled:opacity-30"
+            className="text-xs text-faint disabled:opacity-30"
           >
             &#9650;
           </button>
@@ -146,22 +148,22 @@ function ChapterRow({
             data-testid="move-down"
             disabled={index === count - 1}
             onClick={() => onMove(index, 1)}
-            className="text-xs text-neutral-400 disabled:opacity-30"
+            className="text-xs text-faint disabled:opacity-30"
           >
             &#9660;
           </button>
         </div>
-        <span className="w-6 text-sm text-neutral-400">{index + 1}</span>
+        <span className="w-6 text-sm text-faint">{index + 1}</span>
         <span data-testid="chapter-title" className="flex-1 font-medium">
           {chapter.title || "Untitled"}
         </span>
-        <span className="text-sm text-neutral-500">
+        <span className="text-sm text-muted">
           {chapter.pov || "no POV"}
         </span>
         <StatusPill status={chapter.status} />
         <button
           onClick={() => setExpanded((e) => !e)}
-          className="text-sm text-neutral-500 hover:underline"
+          className="text-sm text-muted hover:underline"
         >
           {expanded ? "Close" : "Edit"}
         </button>
@@ -206,53 +208,53 @@ function ChapterEditor({
   }
 
   return (
-    <div className="mt-3 space-y-3 border-t border-neutral-100 pt-3 text-sm">
+    <div className="mt-3 space-y-3 border-t border-edge-soft pt-3 text-sm">
       <label className="block">
-        <span className="text-xs uppercase text-neutral-400">POV</span>
+        <span className="text-xs uppercase text-faint">POV</span>
         <input
           aria-label="POV"
           data-testid="pov-input"
           value={pov}
           onChange={(e) => setPov(e.target.value)}
-          className="mt-1 w-full rounded border border-neutral-300 px-2 py-1"
+          className="mt-1 w-full rounded border border-edge px-2 py-1"
         />
       </label>
       <label className="block">
-        <span className="text-xs uppercase text-neutral-400">Synopsis</span>
+        <span className="text-xs uppercase text-faint">Synopsis</span>
         <textarea
           aria-label="Synopsis"
           data-testid="synopsis-input"
           value={synopsis}
           onChange={(e) => setSynopsis(e.target.value)}
           rows={3}
-          className="mt-1 w-full rounded border border-neutral-300 px-2 py-1"
+          className="mt-1 w-full rounded border border-edge px-2 py-1"
         />
       </label>
       <div>
-        <span className="text-xs uppercase text-neutral-400">Beats</span>
+        <span className="text-xs uppercase text-faint">Beats</span>
         <ol className="mt-1 space-y-1" data-testid="beat-list">
           {beats.map((b, i) => (
             <li key={i} className="flex items-center gap-2" data-testid="beat-item">
-              <span className="w-5 text-neutral-400">{i + 1}</span>
+              <span className="w-5 text-faint">{i + 1}</span>
               <span className="flex-1">{b}</span>
               <button
                 aria-label="Beat up"
                 onClick={() => moveBeat(i, -1)}
-                className="text-neutral-400"
+                className="text-faint"
               >
                 &#9650;
               </button>
               <button
                 aria-label="Beat down"
                 onClick={() => moveBeat(i, 1)}
-                className="text-neutral-400"
+                className="text-faint"
               >
                 &#9660;
               </button>
               <button
                 aria-label="Remove beat"
                 onClick={() => setBeats(beats.filter((_, j) => j !== i))}
-                className="text-red-400"
+                className="text-danger-ink"
               >
                 &times;
               </button>
@@ -266,7 +268,7 @@ function ChapterEditor({
             value={newBeat}
             onChange={(e) => setNewBeat(e.target.value)}
             placeholder="Add a beat"
-            className="flex-1 rounded border border-neutral-300 px-2 py-1"
+            className="flex-1 rounded border border-edge px-2 py-1"
             onKeyDown={(e) => {
               if (e.key === "Enter" && newBeat.trim()) {
                 e.preventDefault();
@@ -283,7 +285,7 @@ function ChapterEditor({
                 setNewBeat("");
               }
             }}
-            className="rounded border border-neutral-300 px-3 py-1"
+            className="rounded border border-edge px-3 py-1"
           >
             Add beat
           </button>
@@ -293,11 +295,11 @@ function ChapterEditor({
         <button
           data-testid="save-chapter"
           onClick={save}
-          className="rounded bg-neutral-900 px-3 py-1 text-white"
+          className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-accent-ink"
         >
           Save chapter
         </button>
-        {saved && <span className="text-green-600">Saved</span>}
+        {saved && <span className="text-ok-ink">Saved</span>}
       </div>
 
       <InterrogationPanel chapter={chapter} onChanged={onChanged} />
@@ -344,16 +346,16 @@ function InterrogationPanel({
   const unanswered = questions.filter((q) => !q.answer).length;
 
   return (
-    <div className="mt-4 rounded border border-neutral-200 bg-neutral-50 p-3">
+    <div className="mt-4 rounded border border-edge-soft bg-inset p-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs uppercase tracking-wide text-neutral-500">
+        <h3 className="text-xs uppercase tracking-wide text-muted">
           Interrogation
         </h3>
         <button
           data-testid="interrogate-button"
           onClick={interrogate}
           disabled={busy}
-          className="rounded border border-neutral-300 bg-white px-3 py-1 text-sm disabled:opacity-50"
+          className="rounded border border-edge bg-surface px-3 py-1 text-sm disabled:opacity-50"
         >
           {busy ? "Asking..." : questions.length ? "Re-interrogate" : "Interrogate"}
         </button>
@@ -427,7 +429,7 @@ function QuestionItem({
   }
 
   return (
-    <li className="rounded bg-white p-2" data-testid="question-item">
+    <li className="rounded bg-surface p-2" data-testid="question-item">
       <p className="mb-1">{question.question}</p>
       <div className="flex items-center gap-2">
         <input
@@ -435,12 +437,12 @@ function QuestionItem({
           data-testid="answer-input"
           value={answer}
           onChange={(e) => setAnswer(e.target.value)}
-          className="flex-1 rounded border border-neutral-300 px-2 py-1 text-sm"
+          className="flex-1 rounded border border-edge px-2 py-1 text-sm"
         />
         <button
           data-testid="save-answer"
           onClick={save}
-          className="rounded bg-neutral-900 px-3 py-1 text-sm text-white"
+          className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-sm text-accent-ink"
         >
           Save answer
         </button>
@@ -450,7 +452,7 @@ function QuestionItem({
           data-testid="resulting-fact"
           className="mt-2 flex items-center gap-2 text-xs"
         >
-          <span className="rounded bg-neutral-100 px-2 py-0.5 uppercase text-neutral-500">
+          <span className="rounded bg-chip px-2 py-0.5 uppercase text-muted">
             plot decision
           </span>
           <span data-testid="fact-status">{factStatus}</span>
@@ -458,7 +460,7 @@ function QuestionItem({
             <button
               data-testid="lock-fact-button"
               onClick={lock}
-              className="text-neutral-500 hover:underline"
+              className="text-muted hover:underline"
             >
               Lock fact
             </button>
@@ -491,9 +493,9 @@ function DraftGate({
   }
 
   return (
-    <div className="mt-3 border-t border-neutral-200 pt-3 text-sm">
+    <div className="mt-3 border-t border-edge-soft pt-3 text-sm">
       {unanswered > 0 && (
-        <p data-testid="draft-block" className="mb-2 text-amber-700">
+        <p data-testid="draft-block" className="mb-2 text-warn-ink">
           {unanswered} unanswered question(s). Answer them, or override to draft
           anyway.
         </p>
@@ -502,7 +504,7 @@ function DraftGate({
         <button
           data-testid="override-draft"
           onClick={() => setOverride(true)}
-          className="rounded border border-amber-400 px-3 py-1 text-amber-700"
+          className="rounded border border-warn-edge px-3 py-1 text-warn-ink"
         >
           Override and draft anyway
         </button>
@@ -511,7 +513,7 @@ function DraftGate({
           href={`/book/${chapter.projectId}/chapter/${chapter.id}/draft`}
           onClick={() => startDrafting()}
           data-testid="start-drafting"
-          className="inline-block rounded bg-neutral-900 px-3 py-1 text-white"
+          className="inline-block rounded bg-accent hover:bg-accent-hover px-3 py-1 text-accent-ink"
         >
           Start drafting
         </Link>

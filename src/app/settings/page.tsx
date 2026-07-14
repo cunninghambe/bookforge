@@ -10,7 +10,7 @@ export default function SettingsPage() {
     <main>
       <TopNav active="settings" />
       <h1 className="mt-6 font-serif text-xl">Settings</h1>
-      <p className="mb-4 max-w-2xl text-sm text-neutral-500">
+      <p className="mb-4 max-w-2xl text-sm text-muted">
         Choose the model per purpose. An override wins over the deploy-time env
         default (the prose default for drafting and revision, the utility default for
         the rest), which in turn wins over the built-in fallback. Reset deletes the

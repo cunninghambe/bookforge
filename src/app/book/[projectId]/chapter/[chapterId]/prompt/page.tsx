@@ -50,12 +50,12 @@ export default async function PromptInspectorPage({
         </h1>
         <Link
           href={`/book/${project.id}/chapter/${chapter.id}/draft`}
-          className="text-sm text-neutral-500 hover:underline"
+          className="text-sm text-muted hover:underline"
         >
           Go to draft
         </Link>
       </div>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         Target beats: {targetBeatIndices.map((i) => i + 1).join(", ") || "none"}.
         Appearing characters: {assembled.appearingCharacters.join(", ") || "none"}.
       </p>
@@ -65,7 +65,7 @@ export default async function PromptInspectorPage({
           {assembled.warnings.map((w, i) => (
             <p
               key={i}
-              className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+              className="rounded border border-warn-edge bg-warn px-3 py-2 text-sm text-warn-ink"
             >
               {w}
             </p>
@@ -74,12 +74,12 @@ export default async function PromptInspectorPage({
       )}
 
       <section className="mb-6">
-        <h2 className="mb-1 text-xs uppercase tracking-wide text-neutral-400">
+        <h2 className="mb-1 text-xs uppercase tracking-wide text-faint">
           System
         </h2>
         <pre
           data-testid="system-block"
-          className="overflow-x-auto whitespace-pre-wrap rounded border border-neutral-200 bg-white p-4 text-sm"
+          className="overflow-x-auto whitespace-pre-wrap rounded border border-edge-soft bg-surface p-4 text-sm"
         >
           {assembled.system}
         </pre>
@@ -87,12 +87,12 @@ export default async function PromptInspectorPage({
 
       {assembled.blocks.map((b) => (
         <section className="mb-6" key={b.name}>
-          <h2 className="mb-1 text-xs uppercase tracking-wide text-neutral-400">
+          <h2 className="mb-1 text-xs uppercase tracking-wide text-faint">
             {b.name}
           </h2>
           <pre
             data-testid={`block-${b.name.replace(/\s+/g, "-").toLowerCase()}`}
-            className="overflow-x-auto whitespace-pre-wrap rounded border border-neutral-200 bg-white p-4 text-sm"
+            className="overflow-x-auto whitespace-pre-wrap rounded border border-edge-soft bg-surface p-4 text-sm"
           >
             {b.content}
           </pre>
@@ -100,7 +100,7 @@ export default async function PromptInspectorPage({
       ))}
 
       <section className="mb-10">
-        <h2 className="mb-1 text-xs uppercase tracking-wide text-neutral-400">
+        <h2 className="mb-1 text-xs uppercase tracking-wide text-faint">
           Full concatenated prompt
         </h2>
         <textarea
@@ -108,7 +108,7 @@ export default async function PromptInspectorPage({
           data-testid="full-prompt"
           value={full}
           rows={20}
-          className="w-full rounded border border-neutral-200 bg-neutral-50 p-4 font-mono text-xs"
+          className="w-full rounded border border-edge-soft bg-inset p-4 font-mono text-xs"
         />
       </section>
     </main>

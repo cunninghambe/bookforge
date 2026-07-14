@@ -35,12 +35,12 @@ export default async function ImportPage({
         <h1 className="font-serif text-xl">Import: {project.title}</h1>
         <Link
           href={`/book/${project.id}`}
-          className="text-sm text-neutral-500 hover:underline"
+          className="text-sm text-muted hover:underline"
         >
           Back to book
         </Link>
       </div>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         Paste one chapter at a time. Each paste saves as a locked chapter, then
         proposes canon facts and character-state deltas through the same approval
         checklist as locking.

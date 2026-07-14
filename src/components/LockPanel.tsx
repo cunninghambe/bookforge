@@ -242,17 +242,17 @@ export function LockPanel({
 
   return (
     <div
-      className="mt-6 rounded border border-neutral-200 bg-neutral-50 p-3"
+      className="mt-6 rounded border border-edge-soft bg-inset p-3"
       data-testid="lock-panel"
     >
-      <h2 className="mb-2 text-xs uppercase tracking-wide text-neutral-500">
+      <h2 className="mb-2 text-xs uppercase tracking-wide text-muted">
         Lock, extract, approve
       </h2>
 
       {error && (
         <div
           data-testid="lock-error"
-          className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+          className="mb-3 rounded border border-danger-edge bg-danger px-3 py-2 text-sm text-danger-ink"
         >
           {error}
         </div>
@@ -264,12 +264,12 @@ export function LockPanel({
             data-testid="lock-button"
             onClick={lock}
             disabled={!canLock}
-            className="rounded bg-neutral-900 px-4 py-1.5 text-sm text-white disabled:opacity-50"
+            className="rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             {busy ? "Locking..." : "Lock chapter"}
           </button>
           {unresolvedCount > 0 && (
-            <p data-testid="lock-hint" className="mt-2 text-xs text-amber-700">
+            <p data-testid="lock-hint" className="mt-2 text-xs text-warn-ink">
               Resolve all {unresolvedCount} comment(s) before locking.
             </p>
           )}
@@ -278,7 +278,7 @@ export function LockPanel({
         <div className="flex items-center gap-3">
           <span
             data-testid="locked-indicator"
-            className="rounded-full bg-neutral-200 px-2 py-0.5 text-xs uppercase tracking-wide text-neutral-600"
+            className="rounded-full bg-chip px-2 py-0.5 text-xs uppercase tracking-wide text-muted"
           >
             locked
           </span>
@@ -286,7 +286,7 @@ export function LockPanel({
             data-testid="unlock-button"
             onClick={unlock}
             disabled={busy}
-            className="text-sm text-neutral-500 hover:underline disabled:opacity-50"
+            className="text-sm text-muted hover:underline disabled:opacity-50"
           >
             Unlock to edit
           </button>
@@ -295,12 +295,12 @@ export function LockPanel({
 
       {summary && (
         <div className="mt-3">
-          <p className="text-xs uppercase tracking-wide text-neutral-400">
+          <p className="text-xs uppercase tracking-wide text-faint">
             Chapter summary
           </p>
           <p
             data-testid="chapter-summary"
-            className="mt-1 rounded border border-neutral-200 bg-white p-2 text-sm text-neutral-700"
+            className="mt-1 rounded border border-edge-soft bg-surface p-2 text-sm text-ink"
           >
             {summary}
           </p>
@@ -310,7 +310,7 @@ export function LockPanel({
       {approved && (
         <div
           data-testid="approve-success"
-          className="mt-3 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
+          className="mt-3 rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
         >
           Approved {approved.facts} fact(s) and {approved.states} state(s). Facts
           are now locked canon; states apply from the next chapter.{" "}
@@ -323,12 +323,12 @@ export function LockPanel({
 
       {extractionRaw !== null && (
         <div className="mt-3">
-          <p className="text-xs uppercase tracking-wide text-amber-700">
+          <p className="text-xs uppercase tracking-wide text-warn-ink">
             Extraction did not parse. Raw model output:
           </p>
           <pre
             data-testid="extraction-raw"
-            className="mt-1 overflow-x-auto rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+            className="mt-1 overflow-x-auto rounded border border-warn-edge bg-warn p-2 text-xs text-warn-ink"
           >
             {extractionRaw}
           </pre>
@@ -337,13 +337,13 @@ export function LockPanel({
 
       {(facts !== null || states !== null) && extractionRaw === null && (
         <div className="mt-4" data-testid="extraction-panel">
-          <p className="mb-2 text-xs uppercase tracking-wide text-neutral-500">
+          <p className="mb-2 text-xs uppercase tracking-wide text-muted">
             Proposals (nothing is added until you approve)
           </p>
 
           <ul className="space-y-2" data-testid="fact-proposals">
             {(facts ?? []).length === 0 && (
-              <li className="text-xs text-neutral-400" data-testid="no-fact-proposals">
+              <li className="text-xs text-faint" data-testid="no-fact-proposals">
                 No fact proposals.
               </li>
             )}
@@ -362,7 +362,7 @@ export function LockPanel({
                       p ? p.map((x, j) => (j === i ? { ...x, approved: false } : x)) : p,
                     );
                 }}
-                className="rounded border border-neutral-200 bg-white p-2 text-sm"
+                className="rounded border border-edge-soft bg-surface p-2 text-sm"
               >
                 <label className="flex items-start gap-2">
                   <input
@@ -381,12 +381,12 @@ export function LockPanel({
                     className="mt-1"
                   />
                   <span className="flex-1">
-                    <span className="mr-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs uppercase text-neutral-500">
+                    <span className="mr-2 rounded bg-chip px-1.5 py-0.5 text-xs uppercase text-muted">
                       {f.type.replace("_", " ")}
                     </span>
                     {f.content}
                     {f.evidenceQuote && (
-                      <span className="mt-1 block text-xs italic text-neutral-400">
+                      <span className="mt-1 block text-xs italic text-faint">
                         evidence: &ldquo;{f.evidenceQuote}&rdquo;
                       </span>
                     )}
@@ -399,7 +399,7 @@ export function LockPanel({
           <ul className="mt-3 space-y-2" data-testid="state-proposals">
             {(states ?? []).length === 0 && (
               <li
-                className="text-xs text-neutral-400"
+                className="text-xs text-faint"
                 data-testid="no-state-proposals"
               >
                 No character-state proposals.
@@ -420,7 +420,7 @@ export function LockPanel({
                       p ? p.map((x, j) => (j === i ? { ...x, approved: false } : x)) : p,
                     );
                 }}
-                className="rounded border border-neutral-200 bg-white p-2 text-sm"
+                className="rounded border border-edge-soft bg-surface p-2 text-sm"
               >
                 <label className="flex items-start gap-2">
                   <input
@@ -443,7 +443,7 @@ export function LockPanel({
                     {s.characterId === null && (
                       <span
                         data-testid={`state-unmatched-${i}`}
-                        className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
+                        className="ml-2 rounded bg-warn-chip px-1.5 py-0.5 text-xs text-warn-ink"
                       >
                         unmatched: map or create before approving
                       </span>
@@ -507,7 +507,7 @@ export function LockPanel({
                               : p,
                           )
                         }
-                        className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                        className="rounded border border-edge px-2 py-1 text-xs"
                       >
                         <option value="">(map to character)</option>
                         {chars.map((c) => (
@@ -520,7 +520,7 @@ export function LockPanel({
                         <button
                           data-testid={`state-create-${i}`}
                           onClick={() => createCharacterInline(s.character, i)}
-                          className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                          className="rounded border border-edge px-2 py-1 text-xs"
                         >
                           Create &ldquo;{s.character}&rdquo;
                         </button>
@@ -536,17 +536,17 @@ export function LockPanel({
             data-testid="approve-button"
             onClick={approve}
             disabled={busy}
-            className="mt-3 rounded bg-neutral-900 px-4 py-1.5 text-sm text-white disabled:opacity-50"
+            className="mt-3 rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             Approve checked proposals
           </button>
-          <span className="ml-3 text-xs text-neutral-400">
+          <span className="ml-3 text-xs text-faint">
             Press a to approve or r to reject a focused proposal.
           </span>
         </div>
       )}
 
-      <div className="mt-4 border-t border-neutral-200 pt-3 text-xs text-neutral-500">
+      <div className="mt-4 border-t border-edge-soft pt-3 text-xs text-muted">
         <Link href={`/book/${projectId}/sweep`} className="hover:underline">
           Run a consistency sweep for this book
         </Link>
@@ -568,13 +568,13 @@ function StateField({
 }) {
   return (
     <span className="flex items-center gap-2">
-      <span className="w-12 text-xs uppercase text-neutral-400">{label}</span>
+      <span className="w-12 text-xs uppercase text-faint">{label}</span>
       <input
         aria-label={label}
         data-testid={testid}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 rounded border border-neutral-300 px-2 py-1 text-xs"
+        className="flex-1 rounded border border-edge px-2 py-1 text-xs"
       />
     </span>
   );

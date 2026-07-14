@@ -12,7 +12,7 @@ export default function CanonPage() {
     <main>
       <TopNav active="canon" />
       <h1 className="mt-6 font-serif text-xl">Canon</h1>
-      <p className="mb-4 text-sm text-neutral-500">
+      <p className="mb-4 text-sm text-muted">
         The store every prompt is assembled from. Retired facts are excluded from
         assembly. Locked facts must be unlocked before editing.
       </p>

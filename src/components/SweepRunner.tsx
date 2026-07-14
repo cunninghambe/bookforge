@@ -89,7 +89,7 @@ export function SweepRunner({
 
   if (lockedChapters.length === 0) {
     return (
-      <p data-testid="no-locked-chapters" className="text-sm text-neutral-500">
+      <p data-testid="no-locked-chapters" className="text-sm text-muted">
         No locked chapters yet. Lock chapters before running a sweep.
       </p>
     );
@@ -97,15 +97,15 @@ export function SweepRunner({
 
   return (
     <div>
-      <div className="flex flex-wrap items-end gap-3 rounded border border-neutral-200 bg-white p-3 text-sm">
+      <div className="flex flex-wrap items-end gap-3 rounded border border-edge-soft bg-surface p-3 text-sm">
         <label className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-neutral-400">From</span>
+          <span className="text-xs uppercase text-faint">From</span>
           <select
             aria-label="From chapter"
             data-testid="sweep-from"
             value={fromOrder}
             onChange={(e) => setFromOrder(Number(e.target.value))}
-            className="rounded border border-neutral-300 px-2 py-1"
+            className="rounded border border-edge px-2 py-1"
           >
             {lockedChapters.map((c) => (
               <option key={c.id} value={c.orderIndex}>
@@ -115,13 +115,13 @@ export function SweepRunner({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-xs uppercase text-neutral-400">To</span>
+          <span className="text-xs uppercase text-faint">To</span>
           <select
             aria-label="To chapter"
             data-testid="sweep-to"
             value={toOrder}
             onChange={(e) => setToOrder(Number(e.target.value))}
-            className="rounded border border-neutral-300 px-2 py-1"
+            className="rounded border border-edge px-2 py-1"
           >
             {lockedChapters.map((c) => (
               <option key={c.id} value={c.orderIndex}>
@@ -134,13 +134,13 @@ export function SweepRunner({
           data-testid="run-sweep"
           onClick={run}
           disabled={running || inRange.length === 0}
-          className="rounded bg-neutral-900 px-4 py-1.5 text-white disabled:opacity-50"
+          className="rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-accent-ink disabled:opacity-50"
         >
           {running ? "Running..." : "Run sweep"}
         </button>
       </div>
 
-      <p className="mt-2 text-sm text-neutral-600" data-testid="sweep-estimate">
+      <p className="mt-2 text-sm text-muted" data-testid="sweep-estimate">
         This will run {inRange.length} chapter
         {inRange.length === 1 ? "" : "s"} and cost tokens.
       </p>
@@ -148,7 +148,7 @@ export function SweepRunner({
       {running && (
         <p
           data-testid="sweep-progress"
-          className="mt-2 text-sm text-sky-700"
+          className="mt-2 text-sm text-info-ink"
         >
           Sweeping {inRange.length} chapter{inRange.length === 1 ? "" : "s"} in
           order...
@@ -158,7 +158,7 @@ export function SweepRunner({
       {error && (
         <div
           data-testid="sweep-error"
-          className="mt-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+          className="mt-3 rounded border border-danger-edge bg-danger px-3 py-2 text-sm text-danger-ink"
         >
           {error}
         </div>
@@ -177,7 +177,7 @@ export function SweepRunner({
               <li
                 key={c.chapterId}
                 data-testid={`sweep-chapter-${c.chapterId}`}
-                className="rounded border border-neutral-200 bg-white p-3 text-sm"
+                className="rounded border border-edge-soft bg-surface p-3 text-sm"
               >
                 <p className="mb-2 font-medium">
                   {c.order}. {c.title}
@@ -185,21 +185,21 @@ export function SweepRunner({
                 {c.error ? (
                   <div
                     data-testid={`sweep-error-${c.chapterId}`}
-                    className="rounded border border-red-300 bg-red-50 p-2 text-xs text-red-800"
+                    className="rounded border border-danger-edge bg-danger p-2 text-xs text-danger-ink"
                   >
-                    <p className="uppercase tracking-wide text-red-700">
+                    <p className="uppercase tracking-wide text-danger-ink">
                       Sweep failed for this chapter:
                     </p>
                     <p className="mt-1">{c.error}</p>
                   </div>
                 ) : c.parseError ? (
                   <div>
-                    <p className="text-xs uppercase text-amber-700">
+                    <p className="text-xs uppercase text-warn-ink">
                       Response did not parse. Raw output:
                     </p>
                     <pre
                       data-testid={`sweep-raw-${c.chapterId}`}
-                      className="mt-1 overflow-x-auto rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+                      className="mt-1 overflow-x-auto rounded border border-warn-edge bg-warn p-2 text-xs text-warn-ink"
                     >
                       {c.rawText}
                     </pre>
@@ -207,7 +207,7 @@ export function SweepRunner({
                 ) : c.contradictions.length === 0 ? (
                   <p
                     data-testid={`sweep-clean-${c.chapterId}`}
-                    className="text-xs text-green-700"
+                    className="text-xs text-ok-ink"
                   >
                     No contradictions.
                   </p>
@@ -217,12 +217,12 @@ export function SweepRunner({
                       <li
                         key={i}
                         data-testid={`contradiction-${c.chapterId}-${i}`}
-                        className="rounded border border-amber-200 bg-amber-50 p-2"
+                        className="rounded border border-warn-edge bg-warn p-2"
                       >
-                        <p className="text-neutral-800">
+                        <p className="text-ink">
                           <span
                             data-testid={`contradiction-severity-${c.chapterId}-${i}`}
-                            className="mr-2 rounded bg-amber-200 px-1.5 py-0.5 text-xs uppercase text-amber-900"
+                            className="mr-2 rounded bg-warn-chip px-1.5 py-0.5 text-xs uppercase text-warn-ink"
                           >
                             {x.severity ?? "unknown"}
                           </span>
@@ -231,7 +231,7 @@ export function SweepRunner({
                         {x.quote && (
                           <p
                             data-testid={`contradiction-quote-${c.chapterId}-${i}`}
-                            className="mt-1 text-xs italic text-neutral-600"
+                            className="mt-1 text-xs italic text-muted"
                           >
                             &ldquo;{x.quote}&rdquo;
                           </p>

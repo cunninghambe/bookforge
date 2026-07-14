@@ -16,7 +16,7 @@ export default function HomePage() {
         <Link
           href="/import-bible"
           data-testid="import-bible-link"
-          className="text-sm text-neutral-600 hover:underline"
+          className="text-sm text-muted hover:underline"
         >
           Import series bible
         </Link>

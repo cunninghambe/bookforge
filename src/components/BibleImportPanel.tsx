@@ -350,24 +350,24 @@ export function BibleImportPanel({
       {error && (
         <div
           data-testid="bible-error"
-          className="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+          className="mb-3 rounded border border-danger-edge bg-danger px-3 py-2 text-sm text-danger-ink"
         >
           {error}
         </div>
       )}
 
       <div
-        className="rounded border border-neutral-200 bg-neutral-50 p-3"
+        className="rounded border border-edge-soft bg-inset p-3"
         data-testid="bible-form"
       >
         <label className="mb-2 flex flex-col gap-1 text-sm">
-          <span className="text-xs uppercase text-neutral-400">Scope</span>
+          <span className="text-xs uppercase text-faint">Scope</span>
           <select
             data-testid="bible-scope"
             value={scope}
             onChange={(e) => setScope(e.target.value)}
             disabled={hasResult || busy}
-            className="w-64 rounded border border-neutral-300 px-2 py-1"
+            className="w-64 rounded border border-edge px-2 py-1"
           >
             <option value="series">Series-wide (all books)</option>
             {projects.map((p) => (
@@ -379,7 +379,7 @@ export function BibleImportPanel({
         </label>
         {!statesShown && (
           <p
-            className="mb-2 text-xs text-neutral-500"
+            className="mb-2 text-xs text-muted"
             data-testid="bible-states-disabled-note"
           >
             Character states need a book scope, so they are not proposed for a
@@ -387,7 +387,7 @@ export function BibleImportPanel({
           </p>
         )}
         <label className="mb-2 flex flex-col gap-1 text-sm">
-          <span className="text-xs uppercase text-neutral-400">Bible text</span>
+          <span className="text-xs uppercase text-faint">Bible text</span>
           <textarea
             ref={textRef}
             data-testid="bible-content"
@@ -395,7 +395,7 @@ export function BibleImportPanel({
             onChange={(e) => setText(e.target.value)}
             disabled={hasResult || busy}
             rows={14}
-            className="rounded border border-neutral-300 p-2 font-serif text-sm"
+            className="rounded border border-edge p-2 font-serif text-sm"
             placeholder="Paste the story bible here: world rules, character sheets, timeline notes, standing decisions."
           />
         </label>
@@ -405,7 +405,7 @@ export function BibleImportPanel({
             data-testid="bible-import-button"
             onClick={importBible}
             disabled={busy || !text.trim()}
-            className="rounded bg-neutral-900 px-4 py-1.5 text-sm text-white disabled:opacity-50"
+            className="rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             {busy ? "Reading the bible..." : "Read bible"}
           </button>
@@ -420,7 +420,7 @@ export function BibleImportPanel({
               setError(null);
               setChunkCount(null);
             }}
-            className="rounded border border-neutral-300 px-4 py-1.5 text-sm"
+            className="rounded border border-edge px-4 py-1.5 text-sm"
           >
             Start over
           </button>
@@ -428,13 +428,13 @@ export function BibleImportPanel({
       </div>
 
       {busy && !hasResult && (
-        <p data-testid="bible-progress" className="mt-2 text-sm text-sky-700">
+        <p data-testid="bible-progress" className="mt-2 text-sm text-info-ink">
           Reading the bible in order...
         </p>
       )}
 
       {chunkCount !== null && (
-        <p className="mt-2 text-xs text-neutral-500" data-testid="bible-chunk-count">
+        <p className="mt-2 text-xs text-muted" data-testid="bible-chunk-count">
           Processed {chunkCount} chunk{chunkCount === 1 ? "" : "s"}.
         </p>
       )}
@@ -442,7 +442,7 @@ export function BibleImportPanel({
       {approvedSummary && (
         <div
           data-testid="bible-approve-success"
-          className="mt-3 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-800"
+          className="mt-3 rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
         >
           Approved {approvedSummary.facts} fact(s), {approvedSummary.characters}{" "}
           character(s), and {approvedSummary.states} state(s).
@@ -451,14 +451,14 @@ export function BibleImportPanel({
 
       {parseFailures.length > 0 && (
         <div className="mt-3" data-testid="bible-parse-failures">
-          <p className="text-xs uppercase tracking-wide text-amber-700">
+          <p className="text-xs uppercase tracking-wide text-warn-ink">
             Some chunks did not parse. Raw model output:
           </p>
           {parseFailures.map((pf) => (
             <pre
               key={pf.chunk}
               data-testid={`bible-parse-failure-${pf.chunk}`}
-              className="mt-1 overflow-x-auto rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+              className="mt-1 overflow-x-auto rounded border border-warn-edge bg-warn p-2 text-xs text-warn-ink"
             >
               chunk {pf.chunk}: {pf.raw}
             </pre>
@@ -468,17 +468,17 @@ export function BibleImportPanel({
 
       {hasResult && (
         <div className="mt-4" data-testid="bible-proposals">
-          <p className="mb-2 text-xs uppercase tracking-wide text-neutral-500">
+          <p className="mb-2 text-xs uppercase tracking-wide text-muted">
             Proposals (nothing is added until you approve). Arrows move between rows,
             a approves, r rejects.
           </p>
 
-          <p className="mb-1 text-xs font-semibold uppercase text-neutral-400">
+          <p className="mb-1 text-xs font-semibold uppercase text-faint">
             Facts
           </p>
           <ul className="space-y-2" data-testid="bible-fact-proposals">
             {factsLen === 0 && (
-              <li className="text-xs text-neutral-400" data-testid="bible-no-facts">
+              <li className="text-xs text-faint" data-testid="bible-no-facts">
                 No fact proposals.
               </li>
             )}
@@ -489,7 +489,7 @@ export function BibleImportPanel({
                 data-testid={`bible-fact-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => moveOrToggle(e, i, (v) => setFactApproved(i, v))}
-                className="rounded border border-neutral-200 bg-white p-2 text-sm focus:border-neutral-500 focus:outline-none"
+                className="rounded border border-edge-soft bg-surface p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:border-edge"
               >
                 <label className="flex items-start gap-2">
                   <input
@@ -500,7 +500,7 @@ export function BibleImportPanel({
                     className="mt-1"
                   />
                   <span className="flex-1">
-                    <span className="mr-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs uppercase text-neutral-500">
+                    <span className="mr-2 rounded bg-chip px-1.5 py-0.5 text-xs uppercase text-muted">
                       {f.type.replace("_", " ")}
                     </span>
                     {f.content}
@@ -510,12 +510,12 @@ export function BibleImportPanel({
             ))}
           </ul>
 
-          <p className="mb-1 mt-3 text-xs font-semibold uppercase text-neutral-400">
+          <p className="mb-1 mt-3 text-xs font-semibold uppercase text-faint">
             Characters
           </p>
           <ul className="space-y-2" data-testid="bible-character-proposals">
             {charsLen === 0 && (
-              <li className="text-xs text-neutral-400" data-testid="bible-no-characters">
+              <li className="text-xs text-faint" data-testid="bible-no-characters">
                 No character proposals.
               </li>
             )}
@@ -530,7 +530,7 @@ export function BibleImportPanel({
                   onKeyDown={(e) =>
                     moveOrToggle(e, flat, (v) => setCharApproved(i, v))
                   }
-                  className="rounded border border-neutral-200 bg-white p-2 text-sm focus:border-neutral-500 focus:outline-none"
+                  className="rounded border border-edge-soft bg-surface p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:border-edge"
                 >
                   <label className="flex items-start gap-2">
                     <input
@@ -545,14 +545,14 @@ export function BibleImportPanel({
                       {c.existingId === null ? (
                         <span
                           data-testid={`bible-character-new-${i}`}
-                          className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-800"
+                          className="ml-2 rounded bg-info-chip px-1.5 py-0.5 text-xs text-info-ink"
                         >
                           new character
                         </span>
                       ) : (
                         <span
                           data-testid={`bible-character-update-${i}`}
-                          className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
+                          className="ml-2 rounded bg-warn-chip px-1.5 py-0.5 text-xs text-warn-ink"
                         >
                           updates {c.existingName}
                           {c.changes.length
@@ -560,7 +560,7 @@ export function BibleImportPanel({
                             : " (no field changes)"}
                         </span>
                       )}
-                      <span className="mt-1 block text-xs text-neutral-500">
+                      <span className="mt-1 block text-xs text-muted">
                         {c.role && <span className="mr-2">role: {c.role}</span>}
                         {c.voiceRules && (
                           <span className="mr-2">voice: {c.voiceRules}</span>
@@ -579,13 +579,13 @@ export function BibleImportPanel({
 
           {statesShown && (
             <>
-              <p className="mb-1 mt-3 text-xs font-semibold uppercase text-neutral-400">
+              <p className="mb-1 mt-3 text-xs font-semibold uppercase text-faint">
                 Character states
               </p>
               <ul className="space-y-2" data-testid="bible-state-proposals">
                 {statesLen === 0 && (
                   <li
-                    className="text-xs text-neutral-400"
+                    className="text-xs text-faint"
                     data-testid="bible-no-states"
                   >
                     No character-state proposals.
@@ -605,7 +605,7 @@ export function BibleImportPanel({
                       onKeyDown={(e) =>
                         moveOrToggle(e, flat, (v) => setStateApproved(i, v))
                       }
-                      className="rounded border border-neutral-200 bg-white p-2 text-sm focus:border-neutral-500 focus:outline-none"
+                      className="rounded border border-edge-soft bg-surface p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:border-edge"
                     >
                       <label className="flex items-start gap-2">
                         <input
@@ -620,14 +620,14 @@ export function BibleImportPanel({
                           {s.characterId !== null ? null : willCreate ? (
                             <span
                               data-testid={`bible-state-batch-${i}`}
-                              className="ml-2 rounded bg-sky-100 px-1.5 py-0.5 text-xs text-sky-800"
+                              className="ml-2 rounded bg-info-chip px-1.5 py-0.5 text-xs text-info-ink"
                             >
                               will be created in this batch
                             </span>
                           ) : (
                             <span
                               data-testid={`bible-state-unmatched-${i}`}
-                              className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
+                              className="ml-2 rounded bg-warn-chip px-1.5 py-0.5 text-xs text-warn-ink"
                             >
                               unmatched: map, or approve its creation above
                             </span>
@@ -697,7 +697,7 @@ export function BibleImportPanel({
                                     : p,
                                 )
                               }
-                              className="rounded border border-neutral-300 px-2 py-1 text-xs"
+                              className="rounded border border-edge px-2 py-1 text-xs"
                             >
                               <option value="">(map to character)</option>
                               {chars.map((c) => (
@@ -720,7 +720,7 @@ export function BibleImportPanel({
             data-testid="bible-approve-button"
             onClick={approveChecked}
             disabled={busy}
-            className="mt-3 rounded bg-neutral-900 px-4 py-1.5 text-sm text-white disabled:opacity-50"
+            className="mt-3 rounded bg-accent hover:bg-accent-hover px-4 py-1.5 text-sm text-accent-ink disabled:opacity-50"
           >
             Approve checked proposals
           </button>
@@ -743,13 +743,13 @@ function BibleStateField({
 }) {
   return (
     <span className="flex items-center gap-2">
-      <span className="w-12 text-xs uppercase text-neutral-400">{label}</span>
+      <span className="w-12 text-xs uppercase text-faint">{label}</span>
       <input
         aria-label={label}
         data-testid={testid}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 rounded border border-neutral-300 px-2 py-1 text-xs"
+        className="flex-1 rounded border border-edge px-2 py-1 text-xs"
       />
     </span>
   );

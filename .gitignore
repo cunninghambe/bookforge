@@ -21,6 +21,9 @@ playwright-report/
 playwright/.cache/
 coverage/
 
+# A9 UI review screenshots (review artifacts, not committed)
+ui-shots/
+
 # OS / editor
 .DS_Store
 *.log
