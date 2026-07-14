@@ -3,7 +3,7 @@ import { getDb } from "@/lib/db";
 import { runBibleImport } from "@/lib/bibleImport";
 
 // Series-bible importer (Amendment A3). Reads the pasted bible (or one chunk of a
-// long one) with UTILITY_MODEL (purpose "bible"), returns categorized proposals
+// long one) with the bible-purpose model, returns categorized proposals
 // (facts, characters, states) for the approval checklist. Nothing is written here;
 // approval goes through POST /api/bible/approve. Long inputs are split on paragraph
 // boundaries at ~24,000 chars per call and processed sequentially; parse failures

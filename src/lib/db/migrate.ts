@@ -110,6 +110,11 @@ export function migrate(sqlite: Database.Database): void {
       output_tokens INTEGER,
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   addColumnIfMissing(sqlite, {
@@ -131,6 +136,14 @@ export function migrate(sqlite: Database.Database): void {
     table: "llm_calls",
     column: "cache_write_tokens",
     definition: "INTEGER",
+  });
+
+  // Amendment A8: llm_calls records which model served each call, so per-purpose
+  // routing is visible in the cost log. Nullable; the same guarded-ALTER pattern.
+  addColumnIfMissing(sqlite, {
+    table: "llm_calls",
+    column: "model",
+    definition: "TEXT",
   });
 }
 

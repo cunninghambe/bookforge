@@ -1,7 +1,11 @@
 import Link from "next/link";
 
 // Shared top navigation for authed pages. Calm and minimal.
-export function TopNav({ active }: { active?: "canon" | "characters" | "books" }) {
+export function TopNav({
+  active,
+}: {
+  active?: "canon" | "characters" | "books" | "settings";
+}) {
   const linkClass = (key: string) =>
     `hover:underline ${active === key ? "font-semibold" : "font-medium"}`;
   return (
@@ -14,6 +18,9 @@ export function TopNav({ active }: { active?: "canon" | "characters" | "books" }
       </Link>
       <Link href="/" className={linkClass("books")}>
         Books
+      </Link>
+      <Link href="/settings" className={linkClass("settings")} data-testid="nav-settings">
+        Settings
       </Link>
       <form action="/api/auth/logout" method="post" className="ml-auto">
         <button type="submit" className="text-neutral-500 hover:underline">

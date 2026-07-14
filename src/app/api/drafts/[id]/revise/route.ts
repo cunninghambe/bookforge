@@ -6,6 +6,7 @@ import { assemblableCanon } from "@/lib/repo/canon";
 import { createRevision } from "@/lib/repo/revisions";
 import { logLlmCall } from "@/lib/repo/llm";
 import { getLlmClient, type CompleteResult } from "@/lib/llm/client";
+import { modelFor } from "@/lib/modelFor";
 import { hasEmDash } from "@/lib/llm/lint";
 import {
   revisionSystemPrompt,
@@ -76,7 +77,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const patchRemainder = buildPatchRemainder(flaggedSpans);
 
   const client = getLlmClient();
-  const model = process.env.DRAFT_MODEL ?? "claude-sonnet-4-6";
+  // Revision shares the draft (prose) model per A8's env grouping.
+  const model = modelFor(db, "revision");
   const encoder = new TextEncoder();
 
   // >40% coverage: skip patches, go straight to full mode (computed before any call).
@@ -237,6 +239,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           outputTokens,
           cacheReadTokens,
           cacheWriteTokens,
+          model,
         });
 
         const analysis = analyzeRevision(oldText, newText, {

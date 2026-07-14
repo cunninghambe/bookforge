@@ -40,7 +40,7 @@ function ctxFor(): { ctx: ToolCtx; db: ReturnType<typeof testDb>["db"] } {
   const { db } = testDb();
   return {
     db,
-    ctx: { db, client: stubClient, draftModel: "m", utilityModel: "m" },
+    ctx: { db, client: stubClient },
   };
 }
 

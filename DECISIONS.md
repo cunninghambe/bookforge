@@ -936,6 +936,76 @@ reuse rather than a second copy.
 
 ---
 
+## Amendment A8 (2026-07-13): Per-purpose model routing
+
+### D84: One resolver is the sole reader of DRAFT_MODEL / UTILITY_MODEL
+
+`src/lib/modelFor.ts` is the single place the env vars are consulted. Every prior
+call site (draft, revise, interrogate, chat, sweep routes; lockFlow summary and
+extraction; bibleImport; and the four LLM-calling MCP tools) now calls
+`modelFor(db, purpose)` and passes the resolved string into both the client call and
+`logLlmCall`. No route, lockFlow, sweep, bibleImport, chat, or MCP file keeps a
+private `process.env` read, and `grep -rn "DRAFT_MODEL\|UTILITY_MODEL" src/` shows
+hits ONLY in `modelFor.ts`. Comment and MCP-description mentions of the env-var names
+elsewhere were reworded to satisfy the same grep constraint. `runSweep` already took
+a `model` parameter, so its caller resolves and passes it (and `runSweep` logs that
+model per chapter); nothing else about the sweep changed.
+
+### D85: Precedence is override, then env default, then hardcoded fallback
+
+`resolveModel(db, purpose)` returns `{ model, source }`: a settings override
+(`model.<purpose>`) if present and non-blank wins (source "override"); else the
+purpose's env default (source "env"); else `claude-sonnet-4-6` (source "fallback").
+Env grouping per SPEC A8: draft and revision read DRAFT_MODEL, the other six read
+UTILITY_MODEL. A blank env var or a blank override is treated as absent, so a
+whitespace value never masks the next level. An unknown purpose throws a clear error
+rather than silently falling back, so a typo fails loudly. `model_test` is a real
+`LlmPurpose` (the Test button) but is deliberately NOT one of the eight routable
+purposes: the Test button uses the user-entered model directly, so `modelFor` rejects
+"model_test" like any other unknown purpose.
+
+### D86: The MCP ToolCtx drops its fixed model strings
+
+A6's `ToolCtx` carried `draftModel` / `utilityModel` computed once at server start.
+A8 removes both fields; each LLM-calling tool now resolves its model per call via
+`modelFor(ctx.db, purpose)`, so an override set in the web UI takes effect on the next
+MCP call without restarting the server. `server.ts` no longer reads the env vars. The
+in-process tool test's context was updated to `{ db, client }`.
+
+### D87: PUT /api/settings/models sets or clears one purpose; blank clears the row
+
+The write route takes `{ purpose, model }`. A non-blank string upserts
+`model.<purpose>`; a null, omitted, or blank model deletes the row (revert to the env
+default), matching SPEC A8's "clearing = deleting the row". Both GET and PUT return
+the full purpose map (`modelMap`) so the client refreshes from the server's own
+resolution rather than guessing. `PUT` rejects an unknown purpose with a 400.
+
+### D88: The Test button call is one tiny non-cached complete() with the model_test fixture
+
+`POST /api/settings/models/test` makes ONE `complete()` call through the ACTIVE
+transport with purpose "model_test" and the entered model, logs it to `llm_calls`
+(purpose "model_test", model recorded) like every other call, and returns
+`{ ok:true, replySnippet, usage }` or `{ ok:false, error: <verbatim message> }`. The
+error is passed through verbatim so an unentitled or misspelled model id fails at
+settings time with the transport's real message, not a mid-draft surprise. The
+automated loop stays fixture-only: `tests/fixtures/model_test.json` backs the Test
+button in e2e; the real invalid-model error path is verified manually against the
+real transport (SPEC A8), not in the loop.
+
+### D89: A8 e2e uses the existing dev llm-calls readback and the fixture draft flow
+
+`tests/e2e/a8.spec.ts` sets a draft override on /settings, runs the existing
+`?fx=clean` fixture draft, and asserts via `/api/dev/llm-calls?chapterId&purpose` that
+the draft row logged the override while an interrogation call (no override) logged the
+env default; then Reset restores the env default and the next draft logs it; a second
+test clicks the Test button and asserts the fixture snippet. The dev readback route
+needed no change: `recentLlmCalls` selects all columns, so the new `model` column
+flows through automatically. The test resets its own override so it leaves no global
+settings state for later specs (and model overrides are inert under the fixture client
+anyway, which ignores the model).
+
+---
+
 ## Canon filter race fix
 
 ### D81: No new unit test for the CanonManager sequence guard

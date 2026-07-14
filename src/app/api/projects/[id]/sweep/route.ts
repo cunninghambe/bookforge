@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { getProject } from "@/lib/repo/projects";
 import { getLlmClient } from "@/lib/llm/client";
+import { modelFor } from "@/lib/modelFor";
 import { runSweep, sweepableChapters } from "@/lib/sweep";
 
-// Consistency sweep over a chapter range (SPEC section 6). One UTILITY_MODEL call
-// per locked chapter (purpose "sweep"), sequential, aggregated into a report. The
-// body carries the order_index range; a GET-style estimate is done client-side
-// from the locked-chapter list before running.
+// Consistency sweep over a chapter range (SPEC section 6). One call per locked
+// chapter (purpose "sweep", model resolved per purpose (A8)), sequential, aggregated
+// into a report. The body carries the order_index range; a GET-style estimate is
+// done client-side from the locked-chapter list before running.
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const db = getDb();
   const { id } = await ctx.params;
@@ -38,7 +39,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
+  const model = modelFor(db, "sweep");
   try {
     const report = await runSweep(db, client, {
       projectId,

@@ -6,9 +6,9 @@ import { listUnresolvedComments } from "@/lib/repo/comments";
 import { generateAndStoreSummary } from "@/lib/lockFlow";
 
 // Locks a chapter (SPEC section 6). Enabled only when every comment on the latest
-// draft is resolved. Generates and stores the chapter summary (UTILITY_MODEL,
-// purpose "summary"), then sets status to 'locked'. Canon extraction is a separate
-// call (POST /api/chapters/[id]/extract-canon) so proposals pass the approval gate.
+// draft is resolved. Generates and stores the chapter summary (purpose "summary"),
+// then sets status to 'locked'. Canon extraction is a separate call
+// (POST /api/chapters/[id]/extract-canon) so proposals pass the approval gate.
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const db = getDb();
   const { id } = await ctx.params;

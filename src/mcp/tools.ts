@@ -47,14 +47,16 @@ import { hasEmDash } from "../lib/llm/lint";
 import { extractMarkers } from "../lib/llm/markers";
 import { assemblableCanon } from "../lib/repo/canon";
 import { orderToUiChapter, uiChapterToOrder } from "../lib/chapterNumbering";
+import { modelFor } from "../lib/modelFor";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
+// A8: the per-call model is resolved from the settings/env resolver (modelFor),
+// keyed on the call's purpose, so the MCP tools honor the same per-purpose routing
+// the web routes do. No fixed model strings are carried on the context.
 export interface ToolCtx {
   db: Db;
   client: LlmClient;
-  draftModel: string;
-  utilityModel: string;
 }
 
 // A tool: its name, one-line description (every chapter number in inputs/outputs
@@ -378,7 +380,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "interrogate_chapter",
     description:
-      "Run interrogation on a chapter (UTILITY_MODEL): generate and store the decision questions, then return them. Costs tokens (one LLM call).",
+      "Run interrogation on a chapter: generate and store the decision questions, then return them. Costs tokens (one LLM call).",
     inputSchema: { chapterId: z.number().int() },
     handler: async (ctx, args) => {
       const chapterId = args.chapterId as number;
@@ -394,9 +396,10 @@ export const TOOL_DEFS: ToolDef[] = [
         beats: chapter.beats,
         lockedCanon: canon,
       });
+      const model = modelFor(ctx.db, "interrogation");
       const res = await ctx.client.complete({
         purpose: "interrogation",
-        model: ctx.utilityModel,
+        model,
         prompt,
         maxTokens: 1024,
       });
@@ -405,6 +408,7 @@ export const TOOL_DEFS: ToolDef[] = [
         chapterId,
         inputTokens: res.inputTokens,
         outputTokens: res.outputTokens,
+        model,
       });
       const parsed = parseJson<unknown>(res.text);
       if (!parsed.ok) {
@@ -455,7 +459,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "draft_scene",
     description:
-      "Draft the given beats of a chapter (DRAFT_MODEL, non-streaming). beats are 1-based beat numbers. Returns the clean prose plus any [MISSING FACT] and [CANON TENSION] notes extracted from it. Costs tokens.",
+      "Draft the given beats of a chapter (non-streaming). beats are 1-based beat numbers. Returns the clean prose plus any [MISSING FACT] and [CANON TENSION] notes extracted from it. Costs tokens.",
     inputSchema: {
       chapterId: z.number().int(),
       beats: z.array(z.number().int().min(1)),
@@ -473,9 +477,10 @@ export const TOOL_DEFS: ToolDef[] = [
         targetBeatIndices: beatIndices,
         draftedSoFar: (args.draftedSoFar as string | undefined) ?? "",
       });
+      const model = modelFor(ctx.db, "draft");
       const r = await completeWithEmDashRetry(ctx.client, {
         purpose: "draft",
-        model: ctx.draftModel,
+        model,
         system: assembled.system,
         promptPrefix: assembled.stablePrefix,
         prompt: assembled.variableRemainder,
@@ -488,6 +493,7 @@ export const TOOL_DEFS: ToolDef[] = [
         outputTokens: r.outputTokens,
         cacheReadTokens: r.cacheReadTokens,
         cacheWriteTokens: r.cacheWriteTokens,
+        model,
       });
       const markers = extractMarkers(r.text);
       return {
@@ -532,7 +538,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "character_chat",
     description:
-      "One character-chat turn (UTILITY_MODEL, non-streaming, A5 semantics). Pin the moment with a book projectId and a 1-based chapter (1..chapter count of the book); an out-of-range pin is rejected. Pass the prior transcript in \"history\" and the new \"message\". Returns the in-character reply and any [MISSING FACT] notes. Nothing is persisted. Costs tokens.",
+      "One character-chat turn (non-streaming, A5 semantics). Pin the moment with a book projectId and a 1-based chapter (1..chapter count of the book); an out-of-range pin is rejected. Pass the prior transcript in \"history\" and the new \"message\". Returns the in-character reply and any [MISSING FACT] notes. Nothing is persisted. Costs tokens.",
     inputSchema: {
       characterId: z.number().int(),
       projectId: z.number().int(),
@@ -576,9 +582,10 @@ export const TOOL_DEFS: ToolDef[] = [
         message: (args.message as string).trim(),
       });
 
+      const model = modelFor(ctx.db, "chat");
       const r = await completeWithEmDashRetry(ctx.client, {
         purpose: "chat",
-        model: ctx.utilityModel,
+        model,
         system: context.system,
         promptPrefix: context.contextPrefix,
         prompt: remainder,
@@ -591,6 +598,7 @@ export const TOOL_DEFS: ToolDef[] = [
         outputTokens: r.outputTokens,
         cacheReadTokens: r.cacheReadTokens,
         cacheWriteTokens: r.cacheWriteTokens,
+        model,
       });
       const markers = extractMarkers(r.text);
       return {
@@ -616,7 +624,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "sweep_book",
     description:
-      "Run the adversarial consistency sweep over a 1-based chapter range of a book (UTILITY_MODEL, one call per locked chapter in range). WARNING: this costs tokens per chapter and can be slow. Returns the aggregated contradiction report.",
+      "Run the adversarial consistency sweep over a 1-based chapter range of a book (one call per locked chapter in range). WARNING: this costs tokens per chapter and can be slow. Returns the aggregated contradiction report.",
     inputSchema: {
       projectId: z.number().int(),
       fromChapter: z.number().int().min(1),
@@ -634,7 +642,7 @@ export const TOOL_DEFS: ToolDef[] = [
         projectId,
         fromOrder,
         toOrder,
-        model: ctx.utilityModel,
+        model: modelFor(ctx.db, "sweep"),
       });
       return report;
     },

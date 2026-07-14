@@ -14,11 +14,13 @@ import { assemblableCanon } from "./repo/canon";
 import { listCharacters } from "./repo/characters";
 import { updateChapter, type Chapter } from "./repo/chapters";
 import { orderToUiChapter } from "./chapterNumbering";
+import { modelFor } from "./modelFor";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
-// Generates and stores the chapter summary (UTILITY_MODEL, purpose "summary",
-// ~150 words, factual, present tense), then sets the chapter to 'locked'.
+// Generates and stores the chapter summary (purpose "summary", ~150 words,
+// factual, present tense), then sets the chapter to 'locked'. The model is resolved
+// per purpose (A8).
 export async function generateAndStoreSummary(
   db: Db,
   chapter: Chapter,
@@ -26,7 +28,7 @@ export async function generateAndStoreSummary(
   fixtureKey?: string,
 ): Promise<{ chapter: Chapter | undefined; summary: string }> {
   const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
+  const model = modelFor(db, "summary");
   const res = await client.complete({
     purpose: "summary",
     model,
@@ -43,16 +45,17 @@ export async function generateAndStoreSummary(
     chapterId: chapter.id,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,
+    model,
   });
   const summary = res.text.trim();
   const updated = updateChapter(db, chapter.id, { summary, status: "locked" });
   return { chapter: updated, summary };
 }
 
-// Runs canon extraction on a chapter's final text: UTILITY_MODEL (purpose
-// "extraction") reads the text plus the current canon and proposes BOTH new-fact
-// and character-state deltas (Amendment A1) in one JSON object. Nothing is
-// written here; the caller renders proposals for the approval checklist.
+// Runs canon extraction on a chapter's final text: purpose "extraction" reads the
+// text plus the current canon and proposes BOTH new-fact and character-state deltas
+// (Amendment A1) in one JSON object. The model is resolved per purpose (A8).
+// Nothing is written here; the caller renders proposals for the approval checklist.
 export async function runCanonExtraction(
   db: Db,
   chapter: Chapter,
@@ -65,7 +68,7 @@ export async function runCanonExtraction(
   const knownCharacters = listCharacters(db).map((c) => c.name);
 
   const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
+  const model = modelFor(db, "extraction");
   const res = await client.complete({
     purpose: "extraction",
     model,
@@ -84,6 +87,7 @@ export async function runCanonExtraction(
     chapterId: chapter.id,
     inputTokens: res.inputTokens,
     outputTokens: res.outputTokens,
+    model,
   });
 
   return parseExtractionResponse(res.text);

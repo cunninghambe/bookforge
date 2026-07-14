@@ -15,7 +15,9 @@ export type LlmPurpose =
   | "draft"
   | "revision"
   | "bible"
-  | "chat";
+  | "chat"
+  // A8: the settings-page Test button makes one tiny call with this purpose.
+  | "model_test";
 
 export interface CompleteOptions {
   purpose: LlmPurpose;

@@ -3,6 +3,7 @@ import { getCharacter } from "@/lib/repo/characters";
 import { listChapters } from "@/lib/repo/chapters";
 import { logLlmCall } from "@/lib/repo/llm";
 import { getLlmClient, type CompleteResult } from "@/lib/llm/client";
+import { modelFor } from "@/lib/modelFor";
 import { hasEmDash } from "@/lib/llm/lint";
 import { CONTROL_DELIM, extractMarkers } from "@/lib/llm/markers";
 import { buildChatContext, buildChatRemainder, type ChatTurn } from "@/lib/chat";
@@ -89,7 +90,7 @@ export async function POST(
   });
 
   const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
+  const model = modelFor(db, "chat");
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -161,6 +162,7 @@ export async function POST(
           outputTokens,
           cacheReadTokens,
           cacheWriteTokens,
+          model,
         });
 
         const markers = extractMarkers(finalText);

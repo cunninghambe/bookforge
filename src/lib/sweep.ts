@@ -121,6 +121,7 @@ export async function runSweep(
       outputTokens: res.outputTokens,
       cacheReadTokens: res.cacheReadTokens,
       cacheWriteTokens: res.cacheWriteTokens,
+      model: input.model,
     });
 
     const parsed = parseSweepResponse(res.text);

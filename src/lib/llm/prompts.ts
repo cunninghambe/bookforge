@@ -101,8 +101,8 @@ Return ONLY a JSON object with this exact shape, and nothing else:
 Use an empty array where there is nothing to change. Do not use em-dashes anywhere. No prose outside the JSON.`;
 }
 
-// Summary generated at lock time. UTILITY_MODEL, ~150 words, factual, present
-// tense, includes canon-relevant developments. Returns plain prose, not JSON.
+// Summary generated at lock time. Summary-purpose model, ~150 words, factual,
+// present tense, includes canon-relevant developments. Returns plain prose, not JSON.
 export function summaryPrompt(args: {
   chapterTitle: string;
   pov: string;

@@ -1335,3 +1335,94 @@ deliberately unchanged here.
 - D83: The phase2 reload assertion was strengthened with explicit row-visibility
   waits instead of re-running until green; `allInnerTexts` does not auto-wait and
   the failure snapshot proved the product was correct.
+
+---
+
+## Amendment A8: Per-purpose model routing
+
+Status: COMPLETE. All tests green. One feature: the author picks the model per
+purpose at runtime from a calm /settings page, instead of the SPEC's coarse
+DRAFT_MODEL / UTILITY_MODEL split. Every LLM call site (routes AND MCP tools) now
+resolves its model through one resolver; the env vars remain the deploy-time
+defaults.
+
+### What was built
+
+- Data. `settings` table (idempotent `CREATE TABLE IF NOT EXISTS`; `key TEXT PRIMARY
+  KEY, value TEXT NOT NULL`) and a nullable `model` column on `llm_calls` (guarded
+  `ALTER TABLE`, same `addColumnIfMissing` pattern as prior columns) so every logged
+  call records which model served it. Drizzle defs in `schema.ts`.
+- Settings repo (`src/lib/repo/settings.ts`): `getSetting`, `setSetting` (upsert via
+  `onConflictDoUpdate`), `deleteSetting`, `listSettings(prefix)`.
+- Resolver (`src/lib/modelFor.ts`): `modelFor(db, purpose)` for exactly draft,
+  revision, chat, interrogation, summary, extraction, sweep, bible. Precedence:
+  settings override (`model.<purpose>`) then env default (DRAFT_MODEL for draft and
+  revision, UTILITY_MODEL for the rest) then `claude-sonnet-4-6`. Unknown purposes
+  throw. Also `resolveModel` (returns `{ model, source }`), `modelMap` (the full
+  purpose map for the UI), `envDefaultFor`, and `isModelPurpose`. This is the ONLY
+  reader of the two env vars in the codebase.
+- Refactor. EVERY call site converted to `modelFor(db, purpose)`, passing the
+  resolved model into the client call AND `logLlmCall`: the draft, revise,
+  interrogate, chat, and sweep routes; `lockFlow` (summary + extraction);
+  `bibleImport`; and the four LLM-calling MCP tools (draft_scene, interrogate_chapter,
+  character_chat, sweep_book). `logLlmCall` gained an optional `model` field. The MCP
+  `ToolCtx` dropped its `draftModel` / `utilityModel` fields; `server.ts` no longer
+  reads the env vars. `runSweep` already took a `model` param (now resolved by its
+  caller and logged per chapter). Comment / description mentions of the env-var names
+  outside the resolver were reworded so the grep constraint holds.
+- LlmPurpose gained `"model_test"` (the Test button). Fixture:
+  `tests/fixtures/model_test.json`.
+- Routes: `GET` + `PUT /api/settings/models` (full purpose map: effective model +
+  source override|env|fallback; PUT sets or clears one override, clearing deletes the
+  row) and `POST /api/settings/models/test` (one tiny call through the active
+  transport with purpose "model_test" and the given model, logged, returning
+  `{ ok, replySnippet, usage }` or `{ ok:false, error: <verbatim> }`).
+- Page `/settings` (linked from TopNav, `data-testid="nav-settings"`) and
+  `SettingsManager.tsx`: one row per purpose showing the effective model and its
+  source, a free-text model input, clickable suggestion chips (claude-fable-5,
+  claude-opus-4-8, claude-sonnet-4-6, sonnet, opus, stated as conveniences not a
+  whitelist), per-row Save / Reset to default / Test buttons, a per-row test result,
+  and a note that aliases work on the claude-code transport but the api-key transport
+  needs full ids. Calm, text-forward styling; `data-testid` throughout.
+
+### Test results
+
+- Unit (vitest): 222 passed (was 208; +14: 8 `modelFor.test.ts` covering
+  override>env>fallback precedence, per-purpose env grouping, blank handling, the
+  string/`{model,source}`/`modelMap` shapes, and unknown-purpose throw including
+  "model_test"; 3 `settings.test.ts` round-trip/overwrite/delete/prefix-list; 3
+  `migrate-a8.test.ts` settings-table + model-column idempotence, pre-A8 upgrade, and
+  `logLlmCall` persisting model (null when omitted)).
+- E2E (Playwright): 34 passed (was 32; +2 in `a8.spec.ts`): set a draft override on
+  /settings, run a fixture draft, assert the dev llm-calls readback logs the override
+  for draft while an interrogation call still logs the env default; Reset restores the
+  env default and the next draft logs it; the Test button returns ok and shows the
+  fixture snippet. Verified cold-capable: `.next` deleted then `npm run test:e2e`
+  (which wipes the DB via the pretest hook) passed 34/34.
+- `npx tsc --noEmit`: clean.
+- `grep -rn "DRAFT_MODEL\|UTILITY_MODEL" src/`: hits ONLY in `src/lib/modelFor.ts`.
+
+### Acceptance check (SPEC Amendment A8)
+
+"with an override set for chat, a chat call logs that model in llm_calls while draft
+calls still log the draft default; clearing the override reverts the next call; the
+Test button run manually on this machine against the claude-code transport accepts a
+valid id and shows a clear verbatim error for a nonsense id." The
+override-routes-one-purpose, other-purpose-keeps-default, and clear-reverts parts are
+covered by `a8.spec.ts` (using draft + interrogation, the same mechanism); the Test
+button under fixtures is covered too. The real-transport valid/nonsense-id manual
+check is a human step per the SPEC (the error mapping is exercised by the route's
+verbatim passthrough); it was not run in this fixture-only automated loop.
+
+### Judgment calls (mirrored in DECISIONS.md, D84-D89)
+
+- D84: one resolver is the sole reader of the env vars; every call site converted;
+  comments/descriptions reworded so the grep holds.
+- D85: precedence override > env > fallback, with env grouping and blank-as-absent;
+  unknown purpose throws; model_test is not a routable purpose.
+- D86: the MCP ToolCtx dropped its fixed model strings; each tool resolves per call.
+- D87: PUT sets/clears one purpose (blank clears the row); both verbs return the map.
+- D88: the Test button is one tiny logged complete() with verbatim error passthrough;
+  the loop stays fixture-only.
+- D89: the A8 e2e reuses the dev llm-calls readback and the fixture draft flow, and
+  resets its own override so it leaves no global settings state.

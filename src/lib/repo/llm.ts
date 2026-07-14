@@ -5,7 +5,8 @@ import * as schema from "../db/schema";
 type Db = BetterSQLite3Database<typeof schema>;
 
 // Records one LLM call for cost-drift visibility. cacheReadTokens /
-// cacheWriteTokens (A4.1) are logged when the provider reported them.
+// cacheWriteTokens (A4.1) are logged when the provider reported them. model (A8) is
+// the resolved model that served the call, so per-purpose routing is visible here.
 export function logLlmCall(
   db: Db,
   args: {
@@ -15,6 +16,7 @@ export function logLlmCall(
     outputTokens: number;
     cacheReadTokens?: number | null;
     cacheWriteTokens?: number | null;
+    model?: string | null;
   },
 ): void {
   db.insert(schema.llmCalls)
@@ -29,6 +31,7 @@ export function logLlmCall(
         args.cacheWriteTokens == null
           ? null
           : Math.round(args.cacheWriteTokens),
+      model: args.model ?? null,
     })
     .run();
 }

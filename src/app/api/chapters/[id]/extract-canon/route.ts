@@ -5,9 +5,9 @@ import { latestDraft } from "@/lib/repo/drafts";
 import { runCanonExtraction } from "@/lib/lockFlow";
 
 // Runs canon extraction on a chapter's final text (SPEC section 6 + Amendment A1).
-// UTILITY_MODEL (purpose "extraction") reads the text plus the current canon and
-// proposes BOTH new-fact and character-state deltas. Proposals are returned to the
-// client for the approval checklist; nothing is written here. A parse failure
+// The extraction call (purpose "extraction") reads the text plus the current canon
+// and proposes BOTH new-fact and character-state deltas. Proposals are returned to
+// the client for the approval checklist; nothing is written here. A parse failure
 // surfaces the raw text instead of dropping the response.
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const db = getDb();

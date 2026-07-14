@@ -32,11 +32,11 @@ async function main(): Promise<void> {
 
   const db = getDb();
   const client = getLlmClient();
-  const draftModel = process.env.DRAFT_MODEL ?? "claude-sonnet-4-6";
-  const utilityModel = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
 
+  // A8: per-call models are resolved from settings/env by modelFor inside each tool
+  // handler, so the server carries no fixed model strings.
   const server = new McpServer({ name: "bookforge", version: "0.1.0" });
-  registerTools(server, { db, client, draftModel, utilityModel });
+  registerTools(server, { db, client });
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

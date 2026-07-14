@@ -9,12 +9,13 @@ import {
 } from "@/lib/repo/chapters";
 import { logLlmCall } from "@/lib/repo/llm";
 import { getLlmClient } from "@/lib/llm/client";
+import { modelFor } from "@/lib/modelFor";
 import { parseJson } from "@/lib/llm/json";
 import { interrogationPrompt, normalizeQuestions } from "@/lib/llm/prompts";
 import { orderToUiChapter } from "@/lib/chapterNumbering";
 
-// Calls UTILITY_MODEL with the interrogation prompt, stores the returned questions,
-// and moves the chapter into the interrogating state.
+// Runs the interrogation prompt (model resolved per purpose, A8), stores the
+// returned questions, and moves the chapter into the interrogating state.
 export async function POST(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const db = getDb();
   const { id } = await ctx.params;
@@ -34,7 +35,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
   });
 
   const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
+  const model = modelFor(db, "interrogation");
   let result;
   try {
     result = await client.complete({
@@ -55,6 +56,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     chapterId,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
+    model,
   });
 
   const parsed = parseJson<unknown>(result.text);

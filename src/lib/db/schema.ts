@@ -136,5 +136,15 @@ export const llmCalls = sqliteTable("llm_calls", {
   // guarded ALTER TABLE in migrate.ts so existing databases upgrade idempotently.
   cacheReadTokens: integer("cache_read_tokens"),
   cacheWriteTokens: integer("cache_write_tokens"),
+  // A8: the model that served this call (per-purpose routing). Nullable; added via
+  // a guarded ALTER TABLE in migrate.ts.
+  model: text("model"),
   createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
+// A8: simple key/value settings store. Model overrides live under keys
+// model.<purpose>; the resolver (src/lib/modelFor.ts) reads them.
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
 });

@@ -1,9 +1,9 @@
 // The series-bible import flow (Amendment A3). Splits the pasted bible into
-// sequential chunks (paragraph boundaries, ~24,000 chars each), runs one
-// UTILITY_MODEL call per chunk (purpose "bible", logged to llm_calls), parses each
-// defensively, and merges the proposals from every chunk into one set. A chunk
-// whose response fails to parse is kept as a parse failure with its raw text so the
-// UI can surface it (SPEC: never silently drop a model response). Nothing is
+// sequential chunks (paragraph boundaries, ~24,000 chars each), runs one call per
+// chunk (purpose "bible", model resolved per purpose (A8), logged to llm_calls),
+// parses each defensively, and merges the proposals from every chunk into one set.
+// A chunk whose response fails to parse is kept as a parse failure with its raw text
+// so the UI can surface it (SPEC: never silently drop a model response). Nothing is
 // written here; the caller returns proposals for the approval checklist.
 
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
@@ -20,6 +20,7 @@ import { chunkBible } from "./bibleChunks";
 import { logLlmCall } from "./repo/llm";
 import { listCanon } from "./repo/canon";
 import { listCharacters } from "./repo/characters";
+import { modelFor } from "./modelFor";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -43,7 +44,7 @@ export async function runBibleImport(
 ): Promise<BibleImportResult> {
   const chunks = chunkBible(args.text);
   const client = getLlmClient();
-  const model = process.env.UTILITY_MODEL ?? "claude-sonnet-4-6";
+  const model = modelFor(db, "bible");
 
   // Context shared by every chunk so the model avoids duplicate proposals: the
   // current locked canon and the tracked character names.
@@ -80,6 +81,7 @@ export async function runBibleImport(
       purpose: "bible",
       inputTokens: res.inputTokens,
       outputTokens: res.outputTokens,
+      model,
     });
 
     const parsed = parseBibleResponse(res.text);
