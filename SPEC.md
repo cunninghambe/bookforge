@@ -404,3 +404,23 @@ Hard boundary, from the SPEC quality bar and recorded in the tool set itself: NO
 Every LLM-calling tool logs to llm_calls with its normal purpose. Errors return MCP tool errors with the underlying message, never silent failures.
 
 Acceptance check: an automated test drives the server over stdio (spawn the process with USE_FIXTURE_LLM=1 and a scratch DATABASE_PATH, speak MCP over the SDK client): lists tools and confirms the human-only actions are absent; canon_add then canon_lock round-trips and the fact appears in canon_list as locked; character_add_state with a 1-based chapter lands at the correct internal order; draft_scene returns the fixture prose with markers extracted; character_chat returns the fixture reply; export_book returns Markdown containing a locked chapter's heading; sweep_book over a range returns the fixture report; an LLM-calling tool logs to llm_calls.
+
+### A7 (2026-07-13): Claude Code auth as the default LLM transport
+
+Purpose: this is a single-user tool running on the author's machine, where Claude Code is installed and authenticated. The app should ride that auth by default instead of requiring a separate ANTHROPIC_API_KEY.
+
+Transport selection in the LLM client factory (getLlmClient), in priority order: USE_FIXTURE_LLM=1 keeps the fixture client (the test loop never makes real calls, unchanged); otherwise LLM_TRANSPORT selects "claude-code" (the new default) or "api-key" (the existing @anthropic-ai/sdk client, which requires ANTHROPIC_API_KEY and keeps its explicit cache_control blocks).
+
+The claude-code transport: a new client implementing the existing LlmClient interface via @anthropic-ai/claude-agent-sdk (new dependency, latest version), which drives the locally installed, authenticated Claude Code. Requirements:
+- complete() and stream() both work. One-shot, single-turn queries with the caller's system prompt, ALL tools disabled, and the caller's model string passed through (DRAFT_MODEL / UTILITY_MODEL keep working).
+- promptPrefix callers keep working: the transport concatenates prefix plus remainder so the model sees byte-identical prompts; block-level cache_control is an api-key-transport detail. Cache usage fields reported by the SDK flow into CompleteResult and llm_calls exactly like A4.1.
+- Usage accounting: input, output, cache read, cache write tokens from the SDK result populate llm_calls unchanged.
+- The em-dash lint, markers, retry-once-on-transient, and every calling surface are transport-agnostic and unchanged.
+- maxTokens is honored if the SDK exposes it; if it does not, the limitation and its env-var escape hatch are documented as a decision rather than silently ignored.
+- A missing or unauthenticated Claude Code installation surfaces a clear error naming the fix (install the CLI, run its login, or provide CLAUDE_CODE_OAUTH_TOKEN), never a bare stack trace.
+
+Configuration: .env.example documents LLM_TRANSPORT (default claude-code), marks ANTHROPIC_API_KEY as optional (api-key transport only), and notes the local Claude Code requirement. DEPLOY.md: local npm run dev (the primary mode per this SPEC) needs no key at all; server deploys (Fly/Docker) either set LLM_TRANSPORT=api-key with a key, or install the CLI in the image and supply CLAUDE_CODE_OAUTH_TOKEN minted by the CLI's setup-token flow; recommend api-key for servers.
+
+Testing: the automated loop stays fixture-only. Unit tests cover the transport-selection matrix (fixture / claude-code default / explicit api-key) and a pure adapter function that maps SDK message streams to text and usage (mocked SDK messages, no real calls). A manual smoke script (npm run llm-smoke) makes one tiny real call through the selected transport and prints the reply and logged usage; it exists for a human (or the orchestrator) to verify auth end to end and is not part of npm test.
+
+Acceptance check: with fixtures off on an authenticated machine, the smoke script returns real model text through the claude-code transport and a real drafting call works in the app with no ANTHROPIC_API_KEY set; the full automated suite passes unchanged on fixtures; llm_calls rows from claude-code calls carry token counts.
