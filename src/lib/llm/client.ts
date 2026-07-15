@@ -684,30 +684,46 @@ export class ClaudeCodeClient implements LlmClient {
     const key = opts.sessionKey;
     const resume = key ? this.sessions.get(key) : undefined;
     let yielded = false;
+    // The inner generator must be explicitly closed when this wrapper is
+    // abandoned early (a client disconnect returns this generator), so its
+    // finally runs and the CLI child is killed. Abandonment does not propagate
+    // to manually iterated inner generators on its own.
+    let inner: AsyncGenerator<string, CompleteResult, unknown> | null = null;
+    let innerSettled = false;
     try {
-      const gen = this.rawStream(opts, resume);
-      while (true) {
-        const { value, done } = await gen.next();
-        if (done) {
-          if (key && value.sessionId) this.sessions.set(key, value.sessionId);
-          return value;
+      inner = this.rawStream(opts, resume);
+      try {
+        while (true) {
+          const { value, done } = await inner.next();
+          if (done) {
+            innerSettled = true;
+            if (key && value.sessionId) this.sessions.set(key, value.sessionId);
+            return value;
+          }
+          yielded = true;
+          yield value;
         }
-        yielded = true;
-        yield value;
-      }
-    } catch (err) {
-      if (resume === undefined || !key || yielded || !isSessionNotFound(err)) {
-        throw err;
-      }
-      this.sessions.delete(key);
-      const gen = this.rawStream(opts, undefined);
-      while (true) {
-        const { value, done } = await gen.next();
-        if (done) {
-          if (value.sessionId) this.sessions.set(key, value.sessionId);
-          return value;
+      } catch (err) {
+        innerSettled = true;
+        if (resume === undefined || !key || yielded || !isSessionNotFound(err)) {
+          throw err;
         }
-        yield value;
+        this.sessions.delete(key);
+        inner = this.rawStream(opts, undefined);
+        innerSettled = false;
+        while (true) {
+          const { value, done } = await inner.next();
+          if (done) {
+            innerSettled = true;
+            if (value.sessionId) this.sessions.set(key, value.sessionId);
+            return value;
+          }
+          yield value;
+        }
+      }
+    } finally {
+      if (inner && !innerSettled) {
+        void inner.return(undefined as unknown as CompleteResult);
       }
     }
   }
@@ -758,6 +774,11 @@ export class ClaudeCodeClient implements LlmClient {
       return null;
     };
 
+    // False until the read loop finishes on its own. When the caller abandons
+    // the generator early (client disconnect: gen.return() resumes execution at
+    // this try's finally), the child is still running and must be killed, or it
+    // would burn tokens with nobody reading.
+    let readToEnd = false;
     try {
       if (!child.stdout) {
         throw new ClaudeCodeError("Claude Code CLI produced no stdout stream.", {
@@ -778,8 +799,12 @@ export class ClaudeCodeClient implements LlmClient {
         const delta = consume(buffer);
         if (delta !== null) yield delta;
       }
+      readToEnd = true;
     } finally {
       clearTimeout(timer);
+      if (!readToEnd && child.exitCode === null && child.signalCode === null) {
+        child.kill();
+      }
     }
 
     const code: number | null = await new Promise((res) => {

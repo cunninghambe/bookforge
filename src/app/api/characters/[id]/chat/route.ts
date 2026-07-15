@@ -118,15 +118,38 @@ export async function POST(
       });
   const encoder = new TextEncoder();
 
+  // The generator currently being pumped, reachable from cancel() so a client
+  // that disconnects mid-stream stops the underlying work (on the claude-code
+  // transport, abandoning the generator kills the CLI child) instead of leaving
+  // it running unobserved.
+  let activeGen: AsyncGenerator<string, CompleteResult, unknown> | null = null;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // After a client disconnect the controller is closed and enqueue throws;
+      // that must not blow up the pump or mask the real error, so every write
+      // goes through this guard.
+      let writable = true;
+      const write = (text: string) => {
+        if (!writable) return;
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          writable = false;
+        }
+      };
       const pump = async (
         gen: AsyncGenerator<string, CompleteResult, unknown>,
       ): Promise<CompleteResult> => {
-        while (true) {
-          const { value, done } = await gen.next();
-          if (done) return value;
-          controller.enqueue(encoder.encode(value));
+        activeGen = gen;
+        try {
+          while (true) {
+            const { value, done } = await gen.next();
+            if (done) return value;
+            write(value);
+          }
+        } finally {
+          activeGen = null;
         }
       };
 
@@ -156,10 +179,8 @@ export async function POST(
         // Em-dash lint: hard reject, auto-retry once.
         if (hasEmDash(finalText)) {
           retried = true;
-          controller.enqueue(
-            encoder.encode(
-              "\n\n[em-dash detected in the reply, regenerating without it]\n\n",
-            ),
+          write(
+            "\n\n[em-dash detected in the reply, regenerating without it]\n\n",
           );
           // A10: after r1 the transport may now hold this conversation's
           // session (r1 seeded it), so the correction rides the session alone
@@ -210,18 +231,26 @@ export async function POST(
           emDashUnresolved: stillHasEmDash,
           missingFacts: markers.missingFacts,
         };
-        controller.enqueue(
-          encoder.encode(CONTROL_DELIM + JSON.stringify(control)),
-        );
-        controller.close();
+        write(CONTROL_DELIM + JSON.stringify(control));
       } catch (err) {
-        controller.enqueue(
-          encoder.encode(
-            CONTROL_DELIM + JSON.stringify({ error: (err as Error).message }),
-          ),
-        );
-        controller.close();
+        // Log server-side (pm2) so a failed turn is diagnosable; before this the
+        // only trace of a mid-stream failure was the client's behavior.
+        console.error("chat stream failed:", err);
+        write(CONTROL_DELIM + JSON.stringify({ error: (err as Error).message }));
       }
+      try {
+        controller.close();
+      } catch {
+        // Already closed by a client disconnect.
+      }
+    },
+    cancel() {
+      // The client went away mid-stream: stop the generator so the underlying
+      // work stops too (the claude-code transport kills its CLI child when the
+      // generator is closed early).
+      const gen = activeGen;
+      activeGen = null;
+      if (gen) void gen.return(undefined as unknown as CompleteResult);
     },
   });
 

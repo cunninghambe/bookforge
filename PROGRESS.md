@@ -1524,3 +1524,47 @@ pre-A10 (unit-asserted).
 See D98 and D99: the route asks, the transport owns; resumed calls never re-pass
 the system prompt; recovery is lossless because the client transcript still rides
 every turn; MCP character_chat stays stateless.
+
+## 2026-07-15: Chat reliability audit (broken partial reply, wedged composer)
+
+Field report: a fresh conversation's first reply rendered partially and the
+composer never re-enabled. Reproduced with a real browser (camofox) against the
+deployed app; curl against the same endpoints never failed, which is itself the
+clue: only real browsers negotiate beyond HTTP/1.1.
+
+Root causes, two independent layers:
+
+1. Client (the wedge): CharacterChat.send() had no try/catch/finally around the
+   fetch and the read loop. Any mid-stream failure (connection reset, proxy
+   hiccup) escaped the handler, so setStreaming(false) never ran: the partial
+   text stayed rendered and Send stayed disabled forever. The failure itself was
+   invisible server-side because the route kept pumping to a dead controller.
+2. Infrastructure (the trigger): Caddy advertises HTTP/3 (alt-svc h3, cached by
+   browsers for 30 days) and listens on UDP 443, but the firewall only allowed
+   443/tcp, so QUIC traffic blackholed. Browsers that upgraded after their first
+   visit got dying streams; curl (HTTP/1.1) never saw it. Fixed at the box:
+   allow 443/udp. This affected every site behind this Caddy, not just chat.
+
+Hardening shipped with the fix:
+
+- The stream protocol parsing moved out of the component into a pure, tested
+  ChatStreamParser (src/lib/chatStream.ts): visibleText() never renders a
+  partially received control delimiter (a chunk boundary can split it), and
+  finish() classifies ended-without-frame and unparseable-frame outcomes.
+- send() is now fully guarded: non-OK responses surface their JSON error; a
+  connection cut mid-stream keeps the partial text and appends a plain note
+  that the reply was cut off; every path lands in a finally that re-enables
+  the composer. The author can always just keep chatting.
+- The route writes through a guard (a closed controller no longer throws into
+  the pump), logs stream failures to the server console (they were previously
+  silent), and implements cancel(): a client that disconnects mid-stream stops
+  the underlying generator.
+- The claude-code transport kills its CLI child when its stream generator is
+  closed early (route cancel or wrapper abandonment), instead of leaving an
+  orphan burning tokens with nobody reading. The session-resume wrapper closes
+  its inner generator explicitly for the same reason.
+
+Verified end to end with a real browser: a fresh conversation completes; a
+mid-turn kill -9 of the CLI child renders a visible error turn and the very
+next message works and still resumes the session (cache read 13941 tokens,
+write 34). Unit count 262 to 272 (ChatStreamParser four-shape contract).
