@@ -209,3 +209,22 @@ describe("buildChatRemainder", () => {
     expect(hasEmDash(remainder)).toBe(false);
   });
 });
+
+// ---- A10: resumed-turn remainder -------------------------------------------
+
+import { buildChatResumeRemainder } from "@/lib/chat";
+
+describe("buildChatResumeRemainder", () => {
+  it("sends only the new author message in the transcript speaker format", () => {
+    const r = buildChatResumeRemainder({
+      characterName: "Mara",
+      message: "What do you fear?",
+    });
+    expect(r).toBe("Author: What do you fear?\n\nMara:");
+  });
+
+  it("falls back to You when the character name is blank", () => {
+    const r = buildChatResumeRemainder({ characterName: "  ", message: "hi" });
+    expect(r).toBe("Author: hi\n\nYou:");
+  });
+});

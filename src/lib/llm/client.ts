@@ -32,6 +32,10 @@ export interface CompleteOptions {
   maxTokens?: number;
   // Distinguishes multiple fixtures for the same purpose in one test run.
   fixtureKey?: string;
+  // A10: opaque conversation identifier. Only the claude-code transport acts on
+  // it (one resumable CLI session per key); the fixture and api-key clients
+  // accept and ignore it.
+  sessionKey?: string;
 }
 
 export interface CompleteResult {
@@ -43,6 +47,9 @@ export interface CompleteResult {
   // cache_read_input_tokens. Undefined when caching is not in play.
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  // A10: the CLI session id from a sessionful claude-code call, so the transport
+  // can resume the conversation next turn. Never logged to llm_calls.
+  sessionId?: string;
 }
 
 // ---- Cacheable request construction (A4.1) --------------------------------
@@ -105,6 +112,9 @@ export interface LlmClient {
   complete(opts: CompleteOptions): Promise<CompleteResult>;
   // Streaming prose. Yields text chunks; resolves usage via the returned promise.
   stream(opts: CompleteOptions): AsyncGenerator<string, CompleteResult, unknown>;
+  // A10: whether the transport holds a resumable session for this key. Callers
+  // treat a missing implementation as always false (fixture, api-key).
+  hasSession?(key: string): boolean;
 }
 
 // ---- Fixture client -------------------------------------------------------
@@ -287,6 +297,11 @@ interface CliResultShape {
   is_error?: boolean;
   api_error_status?: string | number | null;
   result?: string;
+  // A10: identifies the CLI session, present on sessionful and resumed calls.
+  session_id?: string;
+  // Error detail lines on failed runs (e.g. a --resume of a missing session in
+  // stream-json mode reports "No conversation found with session ID: ..." here).
+  errors?: unknown;
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -300,29 +315,38 @@ export interface CliArgsOptions {
   system?: string;
   // stream-json plus partial messages when true; a single json result when false.
   streaming: boolean;
+  // A10: keep the session on disk so a later call can resume it. Omits
+  // --no-session-persistence. Implied by resumeSessionId.
+  persistSession?: boolean;
+  // A10: continue an existing CLI session. Adds --resume <id> and does NOT
+  // re-pass --system-prompt: the session retains the original one (verified
+  // against the installed CLI before coding, per the A7 rule).
+  resumeSessionId?: string;
 }
 
 // Pure: the argv list for a headless call. --system-prompt REPLACES the default
 // Claude Code system prompt (never --append-system-prompt), so bookforge's prose
 // calls do not inherit the tool-oriented default. --tools "" disables every
-// built-in tool and --max-turns 1 keeps it single-turn. Unit tested.
+// built-in tool and --max-turns 1 keeps it single-turn. With neither A10 session
+// option the argv is byte-identical to the pre-A10 shape. Unit tested.
 export function buildCliArgs(opts: CliArgsOptions): string[] {
-  const args: string[] = [
-    "--print",
-    "--model",
-    opts.model,
-    "--max-turns",
-    "1",
-    "--no-session-persistence",
+  const args: string[] = ["--print", "--model", opts.model, "--max-turns", "1"];
+  if (!opts.persistSession && opts.resumeSessionId === undefined) {
+    args.push("--no-session-persistence");
+  }
+  if (opts.resumeSessionId !== undefined) {
+    args.push("--resume", opts.resumeSessionId);
+  }
+  args.push(
     "--tools",
     "",
     "--output-format",
     opts.streaming ? "stream-json" : "json",
-  ];
+  );
   if (opts.streaming) {
     args.push("--verbose", "--include-partial-messages");
   }
-  if (opts.system !== undefined) {
+  if (opts.system !== undefined && opts.resumeSessionId === undefined) {
     args.push("--system-prompt", opts.system);
   }
   return args;
@@ -340,12 +364,17 @@ function has4xxStatus(status: string | number | null | undefined): boolean {
 export function parseCliResult(json: unknown): CompleteResult {
   const obj = (json ?? {}) as CliResultShape;
   if (obj.is_error === true || obj.subtype !== "success") {
+    const joinedErrors = Array.isArray(obj.errors)
+      ? obj.errors.filter((e): e is string => typeof e === "string").join("; ")
+      : "";
     const detail =
       obj.api_error_status !== null && obj.api_error_status !== undefined
         ? String(obj.api_error_status)
         : typeof obj.result === "string" && obj.result.trim() !== ""
           ? obj.result
-          : "unknown error";
+          : joinedErrors !== ""
+            ? joinedErrors
+            : "unknown error";
     throw new ClaudeCodeError(`Claude Code CLI returned an error: ${detail}`, {
       transient: !has4xxStatus(obj.api_error_status),
     });
@@ -357,6 +386,10 @@ export function parseCliResult(json: unknown): CompleteResult {
     outputTokens: usage.output_tokens ?? 0,
     cacheReadTokens: usage.cache_read_input_tokens ?? undefined,
     cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
+    sessionId:
+      typeof obj.session_id === "string" && obj.session_id !== ""
+        ? obj.session_id
+        : undefined,
   };
 }
 
@@ -473,7 +506,55 @@ function cliExitMessage(code: number | null, stderr: string): string {
   } If this is an auth problem, run \`claude\` to log in, or set CLAUDE_CODE_OAUTH_TOKEN.`;
 }
 
+// A10: the claude-code transport's per-process memory of live CLI sessions, one
+// per conversation key. Bounded with oldest-first eviction; losing an entry is
+// always safe because the chat client sends the full transcript every turn, so
+// the next turn re-seeds a fresh session losslessly.
+export class SessionStore {
+  private map = new Map<string, string>();
+  constructor(private readonly maxEntries: number = 64) {}
+  get(key: string): string | undefined {
+    return this.map.get(key);
+  }
+  has(key: string): boolean {
+    return this.map.has(key);
+  }
+  set(key: string, sessionId: string): void {
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, sessionId);
+    while (this.map.size > this.maxEntries) {
+      const oldest = this.map.keys().next().value;
+      if (oldest === undefined) break;
+      this.map.delete(oldest);
+    }
+  }
+  delete(key: string): void {
+    this.map.delete(key);
+  }
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+// A10: a --resume against a session the CLI no longer has fails with this text
+// (on stderr in json mode, in the result event's errors array in stream-json
+// mode; both flow into the ClaudeCodeError message). Verified against the
+// installed CLI before coding.
+function isSessionNotFound(err: unknown): boolean {
+  return (
+    err instanceof ClaudeCodeError &&
+    err.message.includes("No conversation found with session ID")
+  );
+}
+
 export class ClaudeCodeClient implements LlmClient {
+  // A10: conversation key to CLI session id.
+  private readonly sessions = new SessionStore();
+
+  hasSession(key: string): boolean {
+    return this.sessions.has(key);
+  }
+
   // Retry once on transient errors (spawn failure, non-4xx CLI error), then
   // surface. Mirrors AnthropicClient.withRetry; only complete() retries, matching
   // AnthropicClient (a partially streamed generator cannot be safely replayed).
@@ -488,17 +569,48 @@ export class ClaudeCodeClient implements LlmClient {
   }
 
   async complete(opts: CompleteOptions): Promise<CompleteResult> {
-    // Concatenate so the model sees a prompt byte-identical to the api-key
-    // transport; block-level cache_control is an api-key-only detail (A7).
-    const payload = (opts.promptPrefix ?? "") + opts.prompt;
-    const args = buildCliArgs({
-      model: opts.model,
-      system: opts.system,
-      streaming: false,
-    });
-    return this.withRetry(
-      () =>
-        new Promise<CompleteResult>((resolvePromise, reject) => {
+    const resume = opts.sessionKey
+      ? this.sessions.get(opts.sessionKey)
+      : undefined;
+    const attempt = (resumeSessionId: string | undefined) =>
+      this.withRetry(() =>
+        this.runJsonCall(
+          buildCliArgs({
+            model: opts.model,
+            system: opts.system,
+            streaming: false,
+            persistSession: opts.sessionKey !== undefined,
+            resumeSessionId,
+          }),
+          // Resumed calls send only the new remainder: the prefix (and prior
+          // turns) already live in the session. Fresh calls concatenate so the
+          // model sees a prompt byte-identical to the api-key transport (A7).
+          resumeSessionId !== undefined
+            ? opts.prompt
+            : (opts.promptPrefix ?? "") + opts.prompt,
+        ),
+      );
+    let result: CompleteResult;
+    try {
+      result = await attempt(resume);
+    } catch (err) {
+      // The session evaporated (CLI cleanup, restart of another kind): drop it
+      // and run fresh. The recovered turn loses prior-transcript context at
+      // worst; the following turn re-seeds fully from the client transcript.
+      if (resume === undefined || !opts.sessionKey || !isSessionNotFound(err)) {
+        throw err;
+      }
+      this.sessions.delete(opts.sessionKey);
+      result = await attempt(undefined);
+    }
+    if (opts.sessionKey && result.sessionId) {
+      this.sessions.set(opts.sessionKey, result.sessionId);
+    }
+    return result;
+  }
+
+  private runJsonCall(args: string[], payload: string): Promise<CompleteResult> {
+    return new Promise<CompleteResult>((resolvePromise, reject) => {
           const { command, useShell } = resolveClaudeBinary();
           const child = spawn(command, args, {
             shell: useShell,
@@ -558,20 +670,62 @@ export class ClaudeCodeClient implements LlmClient {
               }
             }),
           );
-          child.stdin?.write(payload);
-          child.stdin?.end();
-        }),
-    );
+      child.stdin?.write(payload);
+      child.stdin?.end();
+    });
   }
 
+  // A10: the public stream() wraps rawStream so a resumed call whose session
+  // evaporated can restart fresh, provided nothing has been yielded yet (nothing
+  // was streamed, so the restart is invisible to the caller).
   async *stream(
     opts: CompleteOptions,
   ): AsyncGenerator<string, CompleteResult, unknown> {
-    const payload = (opts.promptPrefix ?? "") + opts.prompt;
+    const key = opts.sessionKey;
+    const resume = key ? this.sessions.get(key) : undefined;
+    let yielded = false;
+    try {
+      const gen = this.rawStream(opts, resume);
+      while (true) {
+        const { value, done } = await gen.next();
+        if (done) {
+          if (key && value.sessionId) this.sessions.set(key, value.sessionId);
+          return value;
+        }
+        yielded = true;
+        yield value;
+      }
+    } catch (err) {
+      if (resume === undefined || !key || yielded || !isSessionNotFound(err)) {
+        throw err;
+      }
+      this.sessions.delete(key);
+      const gen = this.rawStream(opts, undefined);
+      while (true) {
+        const { value, done } = await gen.next();
+        if (done) {
+          if (value.sessionId) this.sessions.set(key, value.sessionId);
+          return value;
+        }
+        yield value;
+      }
+    }
+  }
+
+  private async *rawStream(
+    opts: CompleteOptions,
+    resumeSessionId: string | undefined,
+  ): AsyncGenerator<string, CompleteResult, unknown> {
+    const payload =
+      resumeSessionId !== undefined
+        ? opts.prompt
+        : (opts.promptPrefix ?? "") + opts.prompt;
     const args = buildCliArgs({
       model: opts.model,
       system: opts.system,
       streaming: true,
+      persistSession: opts.sessionKey !== undefined,
+      resumeSessionId,
     });
     const { command, useShell } = resolveClaudeBinary();
     const child = spawn(command, args, { shell: useShell, windowsHide: true });
@@ -657,6 +811,7 @@ export class ClaudeCodeClient implements LlmClient {
       outputTokens: result.outputTokens,
       cacheReadTokens: result.cacheReadTokens,
       cacheWriteTokens: result.cacheWriteTokens,
+      sessionId: result.sessionId,
     };
   }
 }

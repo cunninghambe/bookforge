@@ -6,7 +6,12 @@ import { getLlmClient, type CompleteResult } from "@/lib/llm/client";
 import { modelFor } from "@/lib/modelFor";
 import { hasEmDash } from "@/lib/llm/lint";
 import { CONTROL_DELIM, extractMarkers } from "@/lib/llm/markers";
-import { buildChatContext, buildChatRemainder, type ChatTurn } from "@/lib/chat";
+import {
+  buildChatContext,
+  buildChatRemainder,
+  buildChatResumeRemainder,
+  type ChatTurn,
+} from "@/lib/chat";
 import { validatePinChapter, pinRangeLabel } from "@/lib/chatPin";
 
 // Character chatbot turn (Amendment A5). Body: { projectId, uiChapter, history,
@@ -41,6 +46,13 @@ export async function POST(
   const message = typeof body.message === "string" ? body.message : "";
   const fixtureKey =
     typeof body.fixtureKey === "string" ? body.fixtureKey : undefined;
+  // A10: opaque per-conversation id from the client (rotated on every pin
+  // change). Invalid shapes are ignored, which just means no session reuse.
+  const conversationId =
+    typeof body.conversationId === "string" &&
+    /^[A-Za-z0-9-]{8,64}$/.test(body.conversationId)
+      ? body.conversationId
+      : undefined;
   const history: ChatTurn[] = Array.isArray(body.history)
     ? (body.history as unknown[])
         .map((h) => {
@@ -83,14 +95,27 @@ export async function POST(
     projectId,
     uiChapter,
   });
-  const remainder = buildChatRemainder({
-    characterName: character.name,
-    history,
-    message,
-  });
 
   const client = getLlmClient();
   const model = modelFor(db, "chat");
+
+  // A10: one CLI session per conversation on the claude-code transport. When the
+  // transport already holds a session for this conversation, only the new author
+  // message is sent (the session carries the context and prior turns); otherwise
+  // the full transcript remainder seeds a fresh session, exactly as before.
+  // Transports without hasSession (fixture, api-key) always take the full path.
+  const sessionKey = conversationId
+    ? `chat:${characterId}:${conversationId}`
+    : undefined;
+  const resuming =
+    sessionKey !== undefined && (client.hasSession?.(sessionKey) ?? false);
+  const remainder = resuming
+    ? buildChatResumeRemainder({ characterName: character.name, message })
+    : buildChatRemainder({
+        characterName: character.name,
+        history,
+        message,
+      });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -118,6 +143,7 @@ export async function POST(
             prompt: remainder,
             maxTokens: 1024,
             fixtureKey,
+            sessionKey,
           }),
         );
         let finalText = r1.text;
@@ -135,17 +161,26 @@ export async function POST(
               "\n\n[em-dash detected in the reply, regenerating without it]\n\n",
             ),
           );
+          // A10: after r1 the transport may now hold this conversation's
+          // session (r1 seeded it), so the correction rides the session alone
+          // rather than re-sending the transcript. Sessionless transports keep
+          // the full remainder exactly as before.
+          const correction =
+            "IMPORTANT: your previous reply used an em-dash, which is forbidden. Reply again using commas, colons, full stops, or restructured sentences. No em-dashes.";
+          const retryPrompt =
+            sessionKey !== undefined && (client.hasSession?.(sessionKey) ?? false)
+              ? correction
+              : remainder + "\n\n" + correction;
           const r2 = await pump(
             client.stream({
               purpose: "chat",
               model,
               system: context.system,
               promptPrefix: context.contextPrefix,
-              prompt:
-                remainder +
-                "\n\nIMPORTANT: your previous reply used an em-dash, which is forbidden. Reply again using commas, colons, full stops, or restructured sentences. No em-dashes.",
+              prompt: retryPrompt,
               maxTokens: 1024,
               fixtureKey: fixtureKey ? `${fixtureKey}.retry` : undefined,
+              sessionKey,
             }),
           );
           finalText = r2.text;

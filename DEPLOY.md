@@ -36,6 +36,13 @@ Limitation: the Claude Code CLI has no output-token cap flag, so `maxTokens` is
 not enforced on the claude-code transport (it is honored on the api-key
 transport). The per-call timeout is `CLAUDE_CODE_TIMEOUT_MS` (default 600000ms).
 
+Chat session reuse (A10): on this transport the app keeps one CLI session per
+character-chat conversation and resumes it each turn, so turns after the first
+send only the new message and read the provider cache instead of re-processing
+the growing transcript. Sessions live in process memory and on the CLI's own
+disk; a server restart is safe (the next turn re-seeds losslessly from the
+client-held transcript). Nothing to configure.
+
 `DATABASE_PATH` is optional and defaults to `./data/bookforge.db`. Set it to an
 absolute path to store the database elsewhere; the parent directory is created
 automatically if missing.

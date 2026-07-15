@@ -203,3 +203,15 @@ export function buildChatRemainder(args: {
   lines.push(`${name}:`);
   return lines.join("\n");
 }
+
+// A10: the remainder for a resumed chat turn. The transport's CLI session
+// already holds the character context and every prior turn, so only the new
+// author message goes over the wire, in the same speaker format the session's
+// transcript uses.
+export function buildChatResumeRemainder(args: {
+  characterName: string;
+  message: string;
+}): string {
+  const name = args.characterName.trim() || "You";
+  return [`Author: ${args.message}`, "", `${name}:`].join("\n");
+}

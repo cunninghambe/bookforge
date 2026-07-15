@@ -60,6 +60,10 @@ export function CharacterChat({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
+  // A10: opaque id for the current conversation, rotated whenever the pin is
+  // set or changed, so the server can reuse one transport session per
+  // conversation. The full transcript still rides along every turn.
+  const [conversationId, setConversationId] = useState("");
 
   // Draft pin form values (before the moment is set).
   const [formProject, setFormProject] = useState<string>(
@@ -91,9 +95,11 @@ export function CharacterChat({
     const uiChapter = check.clamped;
     setFormChapter(String(uiChapter));
     // Changing the pin starts a fresh conversation: state boundaries differ, so a
-    // transcript from another moment would leak (SPEC A5).
+    // transcript from another moment would leak (SPEC A5). Rotating the
+    // conversationId also drops any transport session from the prior moment (A10).
     setTurns([]);
     setStreamText("");
+    setConversationId(crypto.randomUUID());
     setPin({ projectId, uiChapter });
   }
 
@@ -101,6 +107,7 @@ export function CharacterChat({
     setPin(null);
     setTurns([]);
     setStreamText("");
+    setConversationId("");
   }
 
   const pinnedProjectTitle = useMemo(() => {
@@ -129,6 +136,7 @@ export function CharacterChat({
         history,
         message,
         fixtureKey,
+        conversationId: conversationId || undefined,
       }),
     });
 

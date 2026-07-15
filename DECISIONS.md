@@ -1071,13 +1071,47 @@ assertion itself is byte-for-byte unchanged. Chosen over re-running until green
 
 ### CLI session reuse for chat caching (from A5.1)
 
-SPEC A5.1 defers: per-conversation reuse of the `claude` binary's resume capability so
+Update 2026-07-14: built as Amendment A10. See D98 and D99.
+
+SPEC A5.1 deferred: per-conversation reuse of the `claude` binary's resume capability so
 chat turns on the claude-code transport hit the provider cache. The live drive measured
 cache writes every turn but zero reads across one-shot spawns (each turn is a fresh
-`claude` process, so the provider cache from the prior turn is never read). Revisit if
-chat becomes heavy. Not built: it would require the claude-code transport to hold and
-resume a session id per conversation, which the current per-call spawn model does not
-do, and it is out of A5.1 scope.
+`claude` process, so the provider cache from the prior turn is never read).
+
+## Amendment A10: chat session reuse on the claude-code transport
+
+### D98: Route asks hasSession; the transport owns all session state
+
+The conversation-to-session mapping lives entirely inside ClaudeCodeClient (an
+exported, bounded SessionStore: 64 entries, oldest-first eviction). The chat route
+only asks the optional `LlmClient.hasSession(key)` before assembling the prompt:
+true means it sends a minimal resume remainder (the new author message alone),
+false means the full transcript remainder exactly as before. The fixture and
+api-key clients do not implement hasSession, so every fixture-driven test and the
+api-key transport behave byte-identically to pre-A10. The alternative (the route
+holding session ids) was rejected: it would leak a transport detail into a route
+and into client state.
+
+Recovery is lossless by construction: the chat client still sends the full
+transcript every turn, so an evaporated CLI session (restart, cleanup, eviction)
+just means the next turn re-seeds a fresh session from the transcript. A resumed
+call that fails with the CLI's "No conversation found with session ID" text drops
+the entry and retries fresh once (complete() always; stream() only when nothing
+has been yielded yet, so the restart is invisible). The worst case is one turn
+answered without prior-transcript context.
+
+### D99: Resumed calls never re-pass the system prompt
+
+Verified against the installed CLI (2.1.209) before coding, per the A7 rule: a
+resumed session retains the original `--system-prompt`, returns the same
+session_id, and reports nonzero cache_read_input_tokens; resuming a missing
+session fails fast on stderr (json mode) and in the result event's `errors` array
+(stream-json mode). buildCliArgs therefore omits `--system-prompt` and
+`--no-session-persistence` when resuming, and parseCliResult folds the `errors`
+array into the thrown detail so both failure shapes are detectable from the error
+message. The MCP character_chat tool stays stateless (callers pass the transcript
+each call): a session per MCP caller would need a conversation identity the tool
+contract does not have.
 
 ## Amendment A9: design pass with dark mode
 

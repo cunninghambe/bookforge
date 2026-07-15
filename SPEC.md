@@ -478,3 +478,28 @@ Testing and acceptance:
 - A repo-level check (unit test or lint script run in npm test) asserting components contain no raw bg-white / bg-neutral- / border-neutral- / text-neutral- classes, so the token system cannot silently erode.
 - Screenshot evidence for review: a script or test that captures both themes across the main pages (login, canon, characters, chat, draft, review, settings) into a local folder for the orchestrator's visual review. Screenshots are review artifacts, not committed assertions.
 - The em-dash rule applies to all new UI copy.
+
+### A10 (2026-07-14): Chat session reuse on the claude-code transport
+
+Purpose: builds the deferred A5.1 item. On the claude-code transport every chat turn spawns a fresh one-shot `claude` process, so the provider cache from the prior turn is never read (measured: cache writes every turn, cache_read_tokens 0 on all logged chat calls) and every turn re-sends the entire growing transcript. Long conversations get slower and costlier per turn, and before the output cap was added they died on the per-call timeout. This amendment makes the transport resume one CLI session per conversation so turn N+1 sends only the new message and reads the rest from the provider cache.
+
+Empirical CLI behavior this design relies on, verified against the installed CLI (2.1.209) before coding, per the A7 rule: a `--print` call WITHOUT `--no-session-persistence` returns a `session_id` in its result JSON; a later `--print --resume <session_id>` call continues that conversation (a remembered codeword is recalled), reports the same session_id, and reports nonzero cache_read_input_tokens; the original `--system-prompt` is retained across resume without re-passing it; resuming a nonexistent session id fails fast with the text "No conversation found with session ID".
+
+Interface contract:
+- CompleteOptions gains optional `sessionKey?: string`, an opaque conversation identifier. The fixture and api-key clients accept and ignore it. Only the claude-code transport acts on it.
+- LlmClient gains optional `hasSession?(key: string): boolean`. The claude-code transport reports whether it holds a live CLI session id for the key; clients that do not implement it are treated as always false.
+- CompleteResult gains optional `sessionId?: string`, populated by the CLI result parser (both json and stream-json paths). Not logged to llm_calls.
+- buildCliArgs gains `persistSession?: boolean` (omit `--no-session-persistence`) and `resumeSessionId?: string` (omit `--no-session-persistence`, add `--resume <id>`, and do NOT re-pass `--system-prompt`: the session retains it). With neither option the argv is byte-identical to today, so every non-chat call path is unchanged.
+
+Claude-code transport mechanics:
+- An in-process SessionStore (exported, unit-tested) maps sessionKey to CLI session id, capped at 64 entries with oldest-first eviction. It is per-process memory: a server restart empties it, which is safe because the chat client always sends the full transcript, so the next turn re-seeds a fresh session losslessly.
+- complete()/stream() with a sessionKey: on a store hit, spawn with `--resume <id>` and write ONLY `opts.prompt` to stdin (the prefix already lives in the session). On a miss, spawn with persistSession and write prefix plus prompt as today, then store the returned session id.
+- Resume failure recovery ("No conversation found" or the session file is gone): drop the store entry; complete() retries once as a fresh sessionful call with the payload it has; stream() restarts the child the same way provided no delta has been yielded yet (nothing was streamed, so the restart is invisible). The recovered turn loses prior-transcript context in the worst case; the following turn re-seeds fully from the client transcript.
+- Every other purpose (draft, revision, extraction, sweep, summary, interrogation, bible, model_test) passes no sessionKey and keeps the exact one-shot behavior it has today.
+
+Chat route and UI:
+- The chat client generates a conversationId (crypto.randomUUID()) whenever the pin is set or changed, and sends it with every turn. Changing the pin already starts a fresh conversation; it now also rotates the conversationId.
+- The route validates conversationId (^[A-Za-z0-9-]{8,64}$, else ignored), builds sessionKey `chat:<characterId>:<conversationId>`, and asks `client.hasSession` before assembling the prompt: on true it sends a minimal resume remainder (the new author message only, via a new unit-tested buildChatResumeRemainder); on false it sends the full transcript remainder exactly as today. The em-dash retry call re-checks hasSession after the first attempt, so on a session transport the correction instruction is sent alone into the same session rather than re-sending the transcript.
+- The MCP character_chat tool is unchanged: it is a stateless single-turn contract whose callers pass the transcript each call, and that stays true (recorded as a decision).
+
+Testing: the automated loop stays fixture-only and every existing test must pass unchanged (the fixture client has no hasSession, so route behavior under fixtures is byte-identical). New units: buildCliArgs three-way variants (default unchanged, persistSession, resume without system), parseCliResult and the stream result path capturing session_id, SessionStore store/hit/eviction, buildChatResumeRemainder format. Real-transport verification is manual, per A7: a multi-turn chat driven with one conversationId must show cache_read_tokens > 0 on turns after the first in llm_calls, per-turn input cost that does not grow with transcript length, and no regression in the 12-turn no-death check.

@@ -1484,3 +1484,43 @@ modifiers work (D90); the accent is a monochrome light/dark inversion, no new hu
 and read server-side (D94); focus is a global focus-visible outline plus explicit
 rings on the approval rows (D95); the favicon is an inline data URI so it is not
 gated by middleware on the login page (D97).
+
+## 2026-07-14: Amendment A10, chat session reuse on the claude-code transport
+
+Builds the A5.1 deferred item. One CLI session per chat conversation: the chat
+client rotates a conversationId on every pin change and sends it each turn; the
+route asks the transport's optional hasSession(key) and on a hit sends only the
+new author message (buildChatResumeRemainder), letting the resumed session carry
+the character context and prior turns; the transport (ClaudeCodeClient) maps
+sessionKey to CLI session id in a bounded SessionStore, spawns fresh sessionful
+calls without --no-session-persistence, resumes with --resume <id> and no
+re-passed system prompt, and recovers from "No conversation found" by dropping
+the entry and rerunning fresh (stream restart only before the first yielded
+delta). The em-dash retry rides the session too, sending the correction alone.
+Every non-chat purpose passes no sessionKey and produces byte-identical argv to
+pre-A10 (unit-asserted).
+
+- CLI behavior verified against claude 2.1.209 before coding (A7 rule):
+  session_id round-trip, codeword recall across resume, system-prompt retention,
+  nonzero cache_read_input_tokens on resume, missing-session failure shapes.
+- Counts: unit 250 to 261 (+11). tsc clean, build clean, e2e unchanged (the
+  fixture client has no hasSession, so fixture-driven routes take the pre-A10
+  path by construction).
+- Real-transport verification (manual, per A7): an 8-turn chat with one
+  conversationId went from the one-shot signature (cache writes growing every
+  turn, zero reads) to steady-state resumes: from turn 3 onward each turn wrote
+  only ~700 to 1200 tokens (the new exchange) while reading 12k to 16.5k from
+  cache. A browser-driven pass (camofox, real login/pin/send flow) confirmed the
+  UI-generated conversationId engages the same path, with in-voice canon-grounded
+  replies and the missing-fact note surfacing in the UI.
+- Found in verification, fixed before commit: rawStream's returned CompleteResult
+  rebuilt the object field by field and dropped sessionId, so the store never
+  learned the session and every stream turn ran fresh. One line (carry
+  sessionId through) plus a parseStreamEvent unit test pinning session_id
+  passthrough. Unit count 261 to 262.
+
+### Judgment calls
+
+See D98 and D99: the route asks, the transport owns; resumed calls never re-pass
+the system prompt; recovery is lossless because the client transcript still rides
+every turn; MCP character_chat stays stateless.
