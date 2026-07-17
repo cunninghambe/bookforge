@@ -131,6 +131,12 @@ docker run -p 3000:3000 \
   bookforge
 ```
 
+Optional: crash reporting (uh-oh). `UH_OH_DSN` (server) is a normal runtime `-e`
+var like the ones above. `NEXT_PUBLIC_UH_OH_DSN` (browser) is inlined into the
+client bundle at build time, so it must be passed to `docker build` instead:
+`docker build --build-arg NEXT_PUBLIC_UH_OH_DSN=... -t bookforge .`. Both are
+no-ops (crash reporting off) when left unset.
+
 `DATABASE_PATH` defaults to `/data/bookforge.db` inside the image, matching the
 mounted volume above.
 
@@ -169,6 +175,12 @@ flyctl secrets set \
 
 `LLM_TRANSPORT=api-key` is the recommended server setting (see the Docker section
 for the CLI-plus-`CLAUDE_CODE_OAUTH_TOKEN` alternative).
+
+Optional: crash reporting (uh-oh). `flyctl secrets set UH_OH_DSN=<dsn>` for the
+server side, same as the secrets above. The browser side is a build-time value
+(see the Docker section), so on Fly it goes on the deploy command instead of a
+secret: `flyctl deploy --build-arg NEXT_PUBLIC_UH_OH_DSN=<dsn>`. Both are no-ops
+when left unset.
 
 Then, and for every subsequent deploy:
 

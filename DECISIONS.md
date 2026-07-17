@@ -1174,6 +1174,51 @@ A minimal book glyph is inlined as a `data:image/svg+xml` URI in the layout
 `metadata.icons`, so it needs no network request and is not gated by middleware on
 the pre-auth login page (a served `/icon.svg` route would 302 to `/login`).
 
+## Uh-oh crash reporting wiring
+
+### D98: Vendored client, no-op without a DSN, UH_OH_DSN / NEXT_PUBLIC_UH_OH_DSN
+
+Crash reporting rides `@uh-oh/js` (the author's own self-hosted tool at
+github.com/cunninghambe/uh-oh), vendored verbatim as one dependency-free file at
+`src/lib/uh-oh-client.ts` via `node <uh-oh repo>/scripts/vendor-js-client.mjs`
+rather than an npm dependency, matching every other consumer of that tool. `init()`
+is called unconditionally from `src/instrumentation.ts` (server, nodejs runtime
+only), `src/instrumentation-client.ts` (browser), and `src/mcp/server.ts`
+(the MCP process), each passing `dsn: process.env.UH_OH_DSN` (server/MCP) or
+`process.env.NEXT_PUBLIC_UH_OH_DSN` (browser). With no DSN configured the client is
+a silent no-op: no listeners installed, no console output, `captureException`
+returns `''`. This ships the wiring safely today, before any uh-oh server exists
+for this app, and turns on the moment a DSN is set with no further code changes.
+`release` is `<package.json version>+0` (`src/lib/uh-oh-release.ts`): this repo has
+no build-id/git-sha convention, so the build segment is a fixed placeholder per the
+wiring convention shared across the author's repos.
+
+### D99: NEXT_PUBLIC_UH_OH_DSN is a Docker/Fly build arg, not a runtime secret
+
+This is the first `NEXT_PUBLIC_` env var in the repo. Next.js inlines
+`NEXT_PUBLIC_` vars into the client bundle at build time, not at request time, so
+`flyctl secrets set` or a plain `docker run -e` (both runtime-only) would have no
+effect on it. The Dockerfile's builder stage gained `ARG NEXT_PUBLIC_UH_OH_DSN=`
+promoted to `ENV` before `npm run build`, defaulting to empty (identical image
+output to before this change when the arg is omitted). Documented in `.env.example`
+and DEPLOY.md as `docker build --build-arg ...` / `flyctl deploy --build-arg ...`.
+Server-side `UH_OH_DSN` has no such issue: it is read at request time, so it is a
+normal runtime secret like `ANTHROPIC_API_KEY`.
+
+### D100: MCP server flushes on SIGINT/SIGTERM before exit
+
+`src/mcp/server.ts` installs `SIGINT`/`SIGTERM` handlers that `await flush(2000)`
+then `process.exit(0)`, so a queued-but-unsent event is not silently dropped when
+the MCP client shuts the server down (the SDK's `StdioClientTransport.close()`
+sends `SIGTERM`, then `SIGKILL` after its own timeout, so this window is real and
+exercised by the existing stdio acceptance test). Without a DSN, `flush()` resolves
+immediately (no client installed), so this adds no observable delay to shutdown.
+The startup-failure path (`main().catch`) also calls `captureException` and
+`flush(2000)` before its existing `process.exit(1)`. The tool-dispatch catch in
+`registerTools` (`src/mcp/tools.ts`) adds one breadcrumb naming the tool and calls
+`captureException` before returning the existing MCP tool-error response; the
+response shape and message are unchanged.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

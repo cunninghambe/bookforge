@@ -48,6 +48,7 @@ import { extractMarkers } from "../lib/llm/markers";
 import { assemblableCanon } from "../lib/repo/canon";
 import { orderToUiChapter, uiChapterToOrder } from "../lib/chapterNumbering";
 import { modelFor } from "../lib/modelFor";
+import { addBreadcrumb, captureException } from "../lib/uh-oh-client";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -669,6 +670,9 @@ export function registerTools(server: McpServer, ctx: ToolCtx): void {
             content: [{ type: "text" as const, text: JSON.stringify(result) }],
           };
         } catch (err) {
+          // Crash reporting (uh-oh): a no-op until UH_OH_DSN is configured.
+          addBreadcrumb({ category: "mcp-tool", message: `tool ${def.name} threw` });
+          captureException(err);
           const message = err instanceof Error ? err.message : String(err);
           return {
             content: [{ type: "text" as const, text: message }],

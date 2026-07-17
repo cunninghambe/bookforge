@@ -4,6 +4,8 @@ import { loadEnvLocal } from "../lib/loadEnvLocal";
 import { getDb } from "../lib/db";
 import { getLlmClient } from "../lib/llm/client";
 import { registerTools } from "./tools";
+import { init, captureException, flush } from "../lib/uh-oh-client";
+import { UH_OH_RELEASE } from "../lib/uh-oh-release";
 
 // BookForge MCP server (Amendment A6). A local, single-user stdio process that
 // operates directly on the SQLite database through the same repo layer the web
@@ -26,9 +28,34 @@ import { registerTools } from "./tools";
 // The MCP server bypasses the web password gate by design: it is a local process
 // with the same trust boundary as the SQLite file itself (see DEPLOY.md).
 
+// The MCP client (StdioClientTransport.close()) sends SIGTERM, then SIGKILL after
+// its own timeout, to shut this process down. Flush any queued-but-unsent crash
+// report before exiting so it is not silently dropped. A no-op (resolves
+// immediately) when uh-oh was never initialized (no DSN).
+function installShutdownFlush(): void {
+  const shutdown = async (): Promise<void> => {
+    await flush(2000);
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
+}
+
 async function main(): Promise<void> {
   // Reuse the exact .env.local parsing the llm-smoke script uses (A6).
   loadEnvLocal();
+
+  // Crash reporting (uh-oh, self-hosted). init() without a DSN is a silent
+  // no-op (no listeners installed, no console noise), so this ships safely
+  // before any server DSN exists. The client never writes to stdout (only
+  // console.error/console.warn, and only on an actual internal failure), so
+  // it cannot corrupt the MCP stdio transport.
+  init({
+    dsn: process.env.UH_OH_DSN,
+    release: UH_OH_RELEASE,
+    environment: process.env.NODE_ENV,
+  });
+  installShutdownFlush();
 
   const db = getDb();
   const client = getLlmClient();
@@ -44,7 +71,9 @@ async function main(): Promise<void> {
   process.stderr.write("bookforge MCP server ready on stdio\n");
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
+  captureException(err);
+  await flush(2000);
   process.stderr.write(
     `bookforge MCP server failed to start: ${err instanceof Error ? err.message : String(err)}\n`,
   );

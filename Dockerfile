@@ -20,6 +20,14 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Optional. NEXT_PUBLIC_ vars are inlined into the client bundle at build time
+# (Next.js cannot read them at runtime), so browser crash reporting needs this
+# as a build arg, not a runtime secret: `docker build --build-arg
+# NEXT_PUBLIC_UH_OH_DSN=... .` or `flyctl deploy --build-arg
+# NEXT_PUBLIC_UH_OH_DSN=...`. Empty default: an unset arg still builds a plain
+# image with crash reporting off, matching every other optional env var here.
+ARG NEXT_PUBLIC_UH_OH_DSN=
+ENV NEXT_PUBLIC_UH_OH_DSN=$NEXT_PUBLIC_UH_OH_DSN
 RUN npm run build
 
 # ---- runner: minimal runtime image ----
