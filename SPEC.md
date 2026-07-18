@@ -532,3 +532,59 @@ MCP: a `search` tool over the same query layer (query, kinds, projectId, include
 Non-goals, recorded: no semantic or embedding search (FTS is the right tool for verbatim recall, and this feature must stay instant and free); no persisted search history; projects (the three book titles) are not indexed, the Books page lists them already.
 
 Acceptance check: with a chapter whose latest draft contains a distinctive word, Ctrl+K then typing that word surfaces the chapter and Enter lands on its draft page; overwriting the working draft to drop the word removes the hit (latest-version-only asserted); a retired canon fact is absent from default results and present with includeRetired; a canon hit deep-links to /canon with the target row highlighted; the MCP search tool returns the chapter hit with its 1-based number and ** markers; a query made of FTS operators and stray quotes returns cleanly (results or nothing, never an error); the palette is fully keyboard drivable (open, type, arrows, Enter) under the e2e suite.
+
+### A12 (2026-07-18): Story threads, dropped-thread detection, and the braid view
+
+Purpose: long-form fiction drops threads. A relationship beat (Theo's feelings for Mara) gets set up in chapter 3, complicated in chapter 5, then silently vanishes for nine chapters, and the repair is expensive because it touches locked material. This amendment makes threads first-class, approval-gated data; makes "dropped" a deterministic query instead of a vibe; renders the book as a braid of thread lines where a dropped thread is literally visible; and feeds open threads back into drafting so the model keeps them warm. The LLM appears in exactly one place (lock-time proposals through the existing extraction call); everything else is mechanical, instant, and free.
+
+Data model (idempotent migration, existing patterns):
+
+```sql
+CREATE TABLE threads (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES projects(id),   -- NULL = series-wide
+  name TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('arc','mystery','promise','relationship')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved','retired')),
+  character_a_id INTEGER REFERENCES characters(id),  -- optional, relationship threads
+  character_b_id INTEGER REFERENCES characters(id),
+  note TEXT,                                    -- author note, e.g. intended payoff
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE thread_touches (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads(id),
+  chapter_id INTEGER NOT NULL REFERENCES chapters(id),
+  kind TEXT NOT NULL CHECK (kind IN ('advance','complicate','payoff','mention')),
+  evidence TEXT,                                -- verbatim quote from the chapter
+  source TEXT,                                  -- 'manual' | 'extraction:<chapter_id>' | 'mcp'
+  created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+A payoff touch does NOT auto-resolve its thread: resolving is a human action (the gate discipline). The UI may nudge ("payoff recorded; resolve?") but never decides. Retired threads are kept and excluded from assembly and flags, like retired canon.
+
+Lock-time proposals, through the existing gate: the A1 lock/extraction call (and the Phase 6 importer, which reuses it) gains a threads section in its JSON contract: { ..., "threads": [{ "thread": "name", "isNew": true|false, "type": "arc|mystery|promise|relationship", "kind": "advance|complicate|payoff|mention", "evidence": "verbatim quote" }] }. The prompt lists the book's existing open threads (plus series-wide) by name so the model attaches rather than duplicates; a proposal whose name matches an existing thread case-insensitively is an attach proposal, anything else renders as a new-thread proposal. Proposals appear in the SAME approval checklist as fact and state proposals with the same keyboard shortcuts; approving an attach inserts a thread_touch with source 'extraction:<chapter_id>'; approving a new-thread proposal creates the thread and its first touch atomically. A missing "threads" key in the model reply parses as empty (the fixture and old replies stay valid). Nothing lands unapproved; there is no approve-all.
+
+Dropped-thread detection, purely mechanical (src/lib/threadFlags.ts, unit-tested, no LLM): with STALE_GAP = 4, measured against the book's highest LOCKED chapter order: a thread is STALE when it is open and (max locked order) minus (order of its latest-touched chapter) exceeds STALE_GAP; it is an ORPHAN when it is open with at most one touch ever and the same gap condition holds (orphans display with distinct wording: "introduced and never developed"). A book with no locked chapters flags nothing. Series-wide threads evaluate per book over that book's touches. Resolved and retired threads never flag.
+
+The braid view, /book/[projectId]/threads, linked from the book page: this is the visualization and it must feel like the rest of the tool: calm, typographic, semantic tokens only, both themes, no chart libraries, no new dependencies. An SVG built from a PURE, unit-tested layout function (buildBraidLayout(threads, touches, chapters) returning typed geometry: rows, nodes, segments, co-touch columns) so the component is a dumb renderer and the geometry has tests.
+
+- Chapter columns left to right (1-based labels, clickable to the chapter's draft page), faint vertical rules; unlocked chapters render fainter. Thread rows top to bottom, ordered by first touch; each thread is a continuous line.
+- Nodes where a thread touches a chapter, shaped by kind: filled circle advance, ring mention, diamond complicate, larger accent-ringed circle payoff. Node tooltips carry the kind and evidence quote; nodes are keyboard-focusable with the global focus ring and Enter opens the chapter.
+- Segments between consecutive touches curve gently (bezier, not straight rules) so the braid reads as woven, not tabular. A segment whose chapter gap exceeds STALE_GAP renders dashed in the warn family: the drop is visible in the line itself. An open thread continues past its last touch to the frontier (latest locked column) as a faint dashed run-out; a resolved thread ends with a terminal tick at its last touch; retired threads render at reduced opacity.
+- Where two or more threads touch the SAME chapter, that column gets a soft highlight band and a thin vertical connector joining the co-touched nodes: intersecting and adjoining lines make convergence chapters obvious at a glance.
+- Beside the braid: the thread list with type and status, flag chips (stale / orphan, warn family) computed by threadFlags, and per-thread actions: add a manual touch (chapter, kind, evidence), edit name/note, Resolve, Retire. A new-thread form (name, type, optional character pair for relationship). Hovering or focusing a list row highlights its line in accent; the braid and list are two views of one selection.
+
+Prompt assembly: the assembler's stable prefix gains an OPEN THREADS block (with CANON etc., so it caches like the rest): each open thread of the book plus series-wide, as name (type), last touch "ch N, kind: evidence snippet" or "not yet touched", capped at the 12 most recently touched with a "+N more" line when over. Instruction text in the block: keep these threads alive where the chapter's beats allow; do not force every thread into every chapter; never resolve a thread the beats do not resolve. The dev prompt inspector and the MCP assembled_prompt tool show the block for free.
+
+Search (A11 extension): threads join the index as a fifth kind ('thread': name as title; type, status, note, and touch evidence as body; triggers on threads and thread_touches plus the rebuild). Thread hits deep-link to /book/<projectId>/threads?highlight=<id> with the list-row scroll-and-flash treatment; series-wide thread hits link to the first book's view. The palette gains a Threads group; the MCP search tool accepts the new kind.
+
+MCP tools, gate discipline unchanged (no tool approves extraction proposals; those remain absent by construction): threads_list (filters: projectId, status; includes computed flags), thread_get (thread plus touch timeline, 1-based chapter numbers per A2), thread_create, thread_touch_add (1-based chapter in, source 'mcp'), thread_resolve, thread_retire (allowed for the same reason canon_lock is: status changes on standing data are author-equivalent actions, not extraction-approval or chapter-lock gates). All read tools return compact JSON.
+
+Non-goals, recorded: no auto-resolution of threads (human only); no LLM "find all threads" analysis pass over existing chapters (the ledger accumulates going forward; backfill is manual touch entry or re-lock); no per-thread color coding (monochrome lines with accent/warn semantics only, per A9); no tension scoring or graphs beyond the braid; the bible importer does not propose threads in this amendment (bibles have no chapters to touch).
+
+Testing: unit tests for the migration (idempotence), repo round-trips, threadFlags rules (stale, orphan, no-locked-chapters, resolved/retired exemptions, series-wide per-book evaluation), extraction parsing (threads key present, absent, malformed; attach vs new matching case-insensitively), approval endpoints (attach inserts touch, new creates thread plus touch atomically, rejection leaves no trace), assembler block content and cap, buildBraidLayout geometry (rows, node kinds, dashed stale segments, run-out, co-touch columns), search kind, and the MCP tools including the tool-surface list. E2E: create a thread and manual touches through the UI and see its line and nodes; lock a chapter whose fixture extraction proposes one attach and one new thread, approve both via keyboard only, and see the braid update; a stale thread shows its flag chip and dashed segment; Resolve ends the line with a terminal tick; a palette search for the thread name lands on the threads page with the row flashed. Every existing test passes unchanged; fixture extraction replies gain a threads section without disturbing any A1 assertion.
+
+Acceptance check: with a book of six locked chapters where thread "Theo and Mara" is touched in chapters 1, 2, and 3 and thread "The stolen ledger" only in chapter 1: the braid shows two lines with the second's post-chapter-1 segment dashed and flagged (orphan wording), the co-touch column at chapter 1 banded and connected; locking a seventh chapter whose text advances Theo and Mara produces an attach proposal whose approval adds the node and un-flags nothing incorrectly; the OPEN THREADS block of the next chapter's assembled prompt names both threads with their last touches; resolving Theo and Mara removes it from the block and ends its line; the MCP threads_list reports the ledger with 1-based chapters and the orphan flag; all numbers the author sees anywhere are 1-based (A2).
