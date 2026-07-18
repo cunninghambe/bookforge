@@ -7,6 +7,7 @@ import { listComments } from "@/lib/repo/comments";
 import { listCharacters } from "@/lib/repo/characters";
 import { getProject } from "@/lib/repo/projects";
 import { orderToUiChapter } from "@/lib/chapterNumbering";
+import { ttsEnabled, sttEnabled } from "@/lib/audio/config";
 import { TopNav } from "@/components/TopNav";
 import { ReviewEditor } from "@/components/ReviewEditor";
 
@@ -44,6 +45,15 @@ export default async function ReviewPage({
           >
             Back to draft
           </Link>
+          {ttsEnabled() && (
+            <Link
+              href={`/listen/${chapter.id}`}
+              className="hover:underline"
+              data-testid="listen-link"
+            >
+              Listen
+            </Link>
+          )}
         </div>
       </div>
 
@@ -62,6 +72,7 @@ export default async function ReviewPage({
           chapterStatus={chapter.status}
           chapterSummary={chapter.summary}
           characters={characters}
+          voiceNotesEnabled={sttEnabled()}
         />
       ) : (
         <p className="mt-6 text-sm text-muted" data-testid="no-draft">

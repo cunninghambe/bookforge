@@ -26,6 +26,11 @@ export default defineConfig({
       ANTHROPIC_API_KEY: "sk-ant-fixture-not-real",
       DRAFT_MODEL: "claude-sonnet-4-6",
       UTILITY_MODEL: "claude-sonnet-4-6",
+      // A14: non-empty URLs so the listen and voice-note surfaces show. Fixture
+      // mode (USE_FIXTURE_LLM=1) short-circuits both bridges before any network
+      // call, so these hosts are never actually contacted.
+      TTS_SERVICE_URL: "http://fixture.invalid",
+      STT_SERVICE_URL: "http://fixture.invalid",
     },
   },
 });

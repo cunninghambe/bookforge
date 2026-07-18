@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { LockPanel } from "./LockPanel";
+import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
+import { paragraphIndexForOffset } from "@/lib/audio/paragraphs";
 
 const CONTROL_DELIM = "\n<<<BOOKFORGE_CTRL>>>\n";
 
@@ -73,6 +75,7 @@ export function ReviewEditor({
   chapterStatus,
   chapterSummary,
   characters,
+  voiceNotesEnabled = false,
 }: {
   draftId: number;
   initialContent: string;
@@ -82,6 +85,7 @@ export function ReviewEditor({
   chapterStatus: string;
   chapterSummary: string | null;
   characters: Array<{ id: number; name: string }>;
+  voiceNotesEnabled?: boolean;
 }) {
   const searchParams = useSearchParams();
   const fixtureKey = searchParams.get("fx") ?? undefined;
@@ -500,6 +504,20 @@ export function ReviewEditor({
       </div>
 
       <aside className="text-sm">
+        {voiceNotesEnabled && (
+          <div className="mb-4 rounded border border-edge-soft p-3">
+            <p className="mb-2 text-xs uppercase tracking-wide text-faint">
+              Voice note
+            </p>
+            <VoiceNoteRecorder
+              chapterId={chapterId}
+              getParagraphIndex={() =>
+                pending ? paragraphIndexForOffset(content, pending.start) : 0
+              }
+              onSaved={() => refreshComments(draftId)}
+            />
+          </div>
+        )}
         <h2 className="mb-2 text-xs uppercase tracking-wide text-faint">
           Comments
         </h2>

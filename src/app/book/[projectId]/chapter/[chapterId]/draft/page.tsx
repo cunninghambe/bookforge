@@ -6,6 +6,7 @@ import { getChapter } from "@/lib/repo/chapters";
 import { latestDraft } from "@/lib/repo/drafts";
 import { getProject } from "@/lib/repo/projects";
 import { orderToUiChapter } from "@/lib/chapterNumbering";
+import { ttsEnabled } from "@/lib/audio/config";
 import { TopNav } from "@/components/TopNav";
 import { DraftEditor } from "@/components/DraftEditor";
 
@@ -47,6 +48,15 @@ export default async function DraftPage({
           >
             Review and revise
           </Link>
+          {ttsEnabled() && (
+            <Link
+              href={`/listen/${chapter.id}`}
+              className="hover:underline"
+              data-testid="listen-link"
+            >
+              Listen
+            </Link>
+          )}
         </div>
       </div>
       <Suspense fallback={<p className="mt-4 text-sm text-faint">Loading editor...</p>}>
