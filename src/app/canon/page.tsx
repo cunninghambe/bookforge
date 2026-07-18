@@ -5,9 +5,17 @@ import { CanonManager } from "@/components/CanonManager";
 
 export const dynamic = "force-dynamic";
 
-export default function CanonPage() {
+export default async function CanonPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ highlight?: string }>;
+}) {
   const db = getDb();
   const projects = listProjects(db).map((p) => ({ id: p.id, title: p.title }));
+  // A10: a search hit deep-links as /canon?highlight=<factId>; the manager
+  // scrolls to and briefly flashes that row.
+  const { highlight } = await searchParams;
+  const highlightId = Number(highlight);
   return (
     <main>
       <TopNav active="canon" />
@@ -16,7 +24,10 @@ export default function CanonPage() {
         The store every prompt is assembled from. Retired facts are excluded from
         assembly. Locked facts must be unlocked before editing.
       </p>
-      <CanonManager projects={projects} />
+      <CanonManager
+        projects={projects}
+        highlightId={Number.isFinite(highlightId) ? highlightId : null}
+      />
     </main>
   );
 }

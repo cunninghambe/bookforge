@@ -6,6 +6,7 @@ import { TOOL_DEFS, TOOL_NAMES, type ToolCtx } from "@/mcp/tools";
 import type { LlmClient, CompleteOptions, CompleteResult } from "@/lib/llm/client";
 import { createCharacter, addState } from "@/lib/repo/characters";
 import { createChapter } from "@/lib/repo/chapters";
+import { createDraftVersion } from "@/lib/repo/drafts";
 
 // In-process coverage of the MCP tool handlers (A6): the 1-based/0-based boundary
 // conversions, output shaping, and the forbidden-tool absence, without spawning a
@@ -51,9 +52,10 @@ function tool(name: string) {
 }
 
 describe("MCP tool surface", () => {
-  it("registers exactly the SPEC A6 tools", () => {
+  it("registers exactly the SPEC A6 tools plus A10 search", () => {
     expect([...TOOL_NAMES].sort()).toEqual(
       [
+        "search",
         "answer_question",
         "assembled_prompt",
         "canon_add",
@@ -252,5 +254,60 @@ describe("tool behavior and shaping", () => {
     await expect(
       (async () => tool("chapter_get").handler(ctx, { chapterId: 9999 }))(),
     ).rejects.toThrow(/not found/i);
+  });
+});
+
+describe("search tool (A10)", () => {
+  interface Hit {
+    kind: string;
+    id: number;
+    chapter?: number;
+    title: string;
+    snippet: string;
+    status?: string;
+  }
+
+  it("finds a chapter by its latest draft prose with a 1-based number and ** markers", async () => {
+    const { ctx, db } = ctxFor();
+    const ch = createChapter(db, { projectId: 1, title: "The Climb" });
+    createDraftVersion(db, ch.id, "The twin moons hung over the ridge.");
+    const out = (await tool("search").handler(ctx, {
+      query: "twin moons",
+    })) as { hits: Hit[] };
+    const hit = out.hits.find((h) => h.kind === "chapter" && h.id === ch.id);
+    expect(hit).toBeTruthy();
+    expect(hit!.chapter).toBe(1);
+    expect(hit!.snippet).toMatch(/\*\*twin/i);
+  });
+
+  it("excludes retired canon by default and includes it with includeRetired", async () => {
+    const { ctx } = ctxFor();
+    const added = (await tool("canon_add").handler(ctx, {
+      type: "world_rule",
+      content: "Vermilion ink is reserved for the crown.",
+      status: "provisional",
+    })) as { fact: { id: number } };
+    await tool("canon_retire").handler(ctx, { id: added.fact.id });
+
+    const byDefault = (await tool("search").handler(ctx, {
+      query: "vermilion",
+    })) as { hits: Hit[] };
+    expect(byDefault.hits.some((h) => h.id === added.fact.id)).toBe(false);
+
+    const withRetired = (await tool("search").handler(ctx, {
+      query: "vermilion",
+      includeRetired: true,
+    })) as { hits: Hit[] };
+    const hit = withRetired.hits.find((h) => h.id === added.fact.id);
+    expect(hit).toBeTruthy();
+    expect(hit!.status).toBe("retired");
+  });
+
+  it("operator soup returns cleanly, never a thrown FTS error", async () => {
+    const { ctx } = ctxFor();
+    const out = (await tool("search").handler(ctx, {
+      query: '"( OR ) AND NEAR( * ^"',
+    })) as { hits: Hit[] };
+    expect(Array.isArray(out.hits)).toBe(true);
   });
 });

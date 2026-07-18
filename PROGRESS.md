@@ -1484,3 +1484,59 @@ modifiers work (D90); the accent is a monochrome light/dark inversion, no new hu
 and read server-side (D94); focus is a global focus-visible outline plus explicit
 rings on the approval rows (D95); the favicon is an inline data URI so it is not
 gated by middleware on the login page (D97).
+
+---
+
+## Amendment A10: Universal search and command palette
+
+Status: COMPLETE. 277 unit tests and 39 e2e tests pass; tsc clean; no LLM calls
+anywhere in the feature.
+
+### What was built
+
+- Index. An FTS5 virtual table `search_index` (unindexed kind/ref_id/project_id/
+  meta, indexed title/body, unicode61 with diacritics removal) over chapters
+  (title, pov, synopsis, summary, beats, LATEST draft prose), canon facts,
+  characters, and character states (titled by the owning character). Kept live
+  by SQL triggers on all five source tables (a character rename refreshes its
+  state rows), and wiped-and-rebuilt in `migrate()` on every startup so pre-A10
+  databases index themselves on upgrade and drift self-heals. `meta` stores raw
+  0-based values; `src/lib/search.ts` converts via chapterNumbering (A2).
+- Query layer. `src/lib/search.ts`: `toFtsQuery` sanitizer (quoted phrases,
+  final-token prefix, FTS syntax unreachable by construction), bm25 ranking with
+  title above body, snippet marker characters U+0001/U+0002 at the boundary,
+  kinds/projectId/includeRetired/limit filters. Series-wide rows stay visible
+  under a projectId scope; retired canon is excluded by default.
+- Web. `GET /api/search` behind the session gate; `CommandPalette` mounted in
+  the root layout (Ctrl/Cmd+K, or the TopNav Search button via a window event),
+  debounced with the stale-response guard, grouped results plus quick-nav
+  commands, full keyboard driving, `<mark>` highlights built from marker
+  segments (no raw HTML). Canon and character hits deep-link as
+  `?highlight=<id>`: the managers reload if needed, scroll to the row, and
+  flash it briefly. Chapter hits open the draft page.
+- MCP. A `search` tool over the same layer (** around matches, 1-based chapter
+  numbers). The A6 human-only gate boundary is untouched; the tool-surface
+  tests now pin the list including `search`.
+
+### Tests
+
+- New unit `tests/unit/search.test.ts` (20): sanitizer edge cases and operator
+  soup, trigger sync per table (latest-draft-only asserted both for new
+  versions and the in-place working-draft update), rename refresh, ranking,
+  scoping, limit clamp, marker snippets, rebuild and migrate idempotence.
+- `tests/unit/mcp-tools.test.ts` (+4) and the stdio acceptance test (+1) cover
+  the MCP tool, including retired-by-default and 1-based numbers.
+- New e2e `tests/e2e/a10.spec.ts` (3): prose search to the draft page with a
+  superseded-draft negative check, canon deep-link with row highlight, Esc /
+  TopNav reopen / arrows / Enter quick-nav to /settings.
+- Counts: unit 250 to 277 (+27), e2e 36 to 39 (+3). tsc clean.
+
+### Judgment calls
+
+See D101 through D105 in DECISIONS.md: one denormalized trigger-maintained FTS
+table rebuilt at migrate (D101); the sanitizer strips or quotes everything and
+keeps hyphens/apostrophes/colons so prose-like queries match prose (D102);
+1-based conversion stays in chapterNumbering (D103); snippet markers are
+control characters rendered per surface (D104); the palette is a root-layout
+client island opened by a window event, hidden on /login, with ?highlight
+deep-links that reload the target list when it is stale (D105).

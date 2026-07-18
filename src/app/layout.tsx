@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { CommandPalette } from "@/components/CommandPalette";
 import "./globals.css";
 
 // A9: a minimal book-glyph favicon inlined as a data URI, so it renders with no
@@ -28,6 +29,8 @@ export default async function RootLayout({
     <html lang="en" className={isDark ? "dark" : undefined}>
       <body className="font-sans antialiased">
         <div className="mx-auto max-w-5xl px-6">{children}</div>
+        {/* A10: the command palette overlay (Ctrl/Cmd+K), one instance app-wide. */}
+        <CommandPalette />
       </body>
     </html>
   );

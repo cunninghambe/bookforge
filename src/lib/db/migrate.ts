@@ -145,6 +145,189 @@ export function migrate(sqlite: Database.Database): void {
     column: "model",
     definition: "TEXT",
   });
+
+  // Amendment A10: the full-text search index. The virtual table and its
+  // triggers are (re)created every migrate (DROP TRIGGER IF EXISTS keeps the
+  // trigger bodies current across upgrades), then the whole index is rebuilt:
+  // O(project size), trivially cheap for a single user, and it both indexes
+  // pre-A10 databases on first run and self-heals any drift. See D101.
+  sqlite.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+      kind UNINDEXED,
+      ref_id UNINDEXED,
+      project_id UNINDEXED,
+      meta UNINDEXED,
+      title,
+      body,
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+  `);
+  sqlite.exec(searchTriggerSql());
+  rebuildSearchIndex(sqlite);
+}
+
+// ---- Amendment A10: search index maintenance -------------------------------
+
+// INSERT ... SELECT statements shared by the triggers and the full rebuild.
+// meta carries RAW database values (0-based order fields); the 1-based
+// conversion happens only in src/lib/search.ts via chapterNumbering (A2, D103).
+
+// A chapter's searchable body: pov, synopsis, summary, beats (the JSON text;
+// the tokenizer discards the punctuation), and the LATEST draft's prose.
+function searchInsertChapters(where: string): string {
+  return `
+    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    SELECT 'chapter', c.id, c.project_id,
+           json_object('orderIndex', c.order_index, 'status', c.status, 'pov', c.pov),
+           COALESCE(c.title, ''),
+           COALESCE(c.pov, '') || ' ' || COALESCE(c.synopsis, '') || ' ' ||
+           COALESCE(c.summary, '') || ' ' || COALESCE(c.beats, '') || ' ' ||
+           COALESCE((SELECT d.content FROM drafts d
+                     WHERE d.chapter_id = c.id
+                     ORDER BY d.version DESC LIMIT 1), '')
+    FROM chapters c ${where};`;
+}
+
+function searchInsertCanon(where: string): string {
+  return `
+    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    SELECT 'canon', f.id, f.project_id,
+           json_object('type', f.type, 'status', f.status),
+           '',
+           f.content
+    FROM canon_facts f ${where};`;
+}
+
+function searchInsertCharacters(where: string): string {
+  return `
+    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    SELECT 'character', ch.id, NULL,
+           json_object('role', ch.role),
+           ch.name,
+           COALESCE(ch.role, '') || ' ' || COALESCE(ch.voice_rules, '') || ' ' ||
+           COALESCE(ch.physical, '') || ' ' || COALESCE(ch.notes, '')
+    FROM characters ch ${where};`;
+}
+
+// State rows carry the owning character's name as their searchable title.
+function searchInsertStates(where: string): string {
+  return `
+    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    SELECT 'state', s.id, s.project_id,
+           json_object('characterId', s.character_id, 'chapterOrder', s.chapter_order),
+           COALESCE((SELECT name FROM characters WHERE id = s.character_id), ''),
+           COALESCE(s.knows, '') || ' ' || COALESCE(s.feels, '') || ' ' ||
+           COALESCE(s.hiding, '')
+    FROM character_states s ${where};`;
+}
+
+function refreshChapter(idExpr: string): string {
+  return `
+    DELETE FROM search_index WHERE kind = 'chapter' AND ref_id = ${idExpr};
+    ${searchInsertChapters(`WHERE c.id = ${idExpr}`)}`;
+}
+
+// Triggers keep the index live at the database level, so no code path can
+// write around it (D101). Recreated every migrate so definitions never go
+// stale. Draft changes refresh the owning chapter's row (the body embeds the
+// latest draft); a character update also refreshes that character's state
+// rows, whose titles carry the name.
+function searchTriggerSql(): string {
+  const t = (name: string, event: string, body: string) => `
+    DROP TRIGGER IF EXISTS ${name};
+    CREATE TRIGGER ${name} ${event} BEGIN${body}
+    END;`;
+
+  return [
+    t("search_chapters_ai", "AFTER INSERT ON chapters", refreshChapter("NEW.id")),
+    t("search_chapters_au", "AFTER UPDATE ON chapters", refreshChapter("NEW.id")),
+    t(
+      "search_chapters_ad",
+      "AFTER DELETE ON chapters",
+      `
+      DELETE FROM search_index WHERE kind = 'chapter' AND ref_id = OLD.id;`,
+    ),
+    t("search_drafts_ai", "AFTER INSERT ON drafts", refreshChapter("NEW.chapter_id")),
+    t("search_drafts_au", "AFTER UPDATE ON drafts", refreshChapter("NEW.chapter_id")),
+    t("search_drafts_ad", "AFTER DELETE ON drafts", refreshChapter("OLD.chapter_id")),
+    t(
+      "search_canon_ai",
+      "AFTER INSERT ON canon_facts",
+      `
+      DELETE FROM search_index WHERE kind = 'canon' AND ref_id = NEW.id;
+      ${searchInsertCanon("WHERE f.id = NEW.id")}`,
+    ),
+    t(
+      "search_canon_au",
+      "AFTER UPDATE ON canon_facts",
+      `
+      DELETE FROM search_index WHERE kind = 'canon' AND ref_id = NEW.id;
+      ${searchInsertCanon("WHERE f.id = NEW.id")}`,
+    ),
+    t(
+      "search_canon_ad",
+      "AFTER DELETE ON canon_facts",
+      `
+      DELETE FROM search_index WHERE kind = 'canon' AND ref_id = OLD.id;`,
+    ),
+    t(
+      "search_characters_ai",
+      "AFTER INSERT ON characters",
+      `
+      DELETE FROM search_index WHERE kind = 'character' AND ref_id = NEW.id;
+      ${searchInsertCharacters("WHERE ch.id = NEW.id")}`,
+    ),
+    t(
+      "search_characters_au",
+      "AFTER UPDATE ON characters",
+      `
+      DELETE FROM search_index WHERE kind = 'character' AND ref_id = NEW.id;
+      ${searchInsertCharacters("WHERE ch.id = NEW.id")}
+      DELETE FROM search_index WHERE kind = 'state' AND ref_id IN
+        (SELECT id FROM character_states WHERE character_id = NEW.id);
+      ${searchInsertStates("WHERE s.character_id = NEW.id")}`,
+    ),
+    t(
+      "search_characters_ad",
+      "AFTER DELETE ON characters",
+      `
+      DELETE FROM search_index WHERE kind = 'character' AND ref_id = OLD.id;
+      DELETE FROM search_index WHERE kind = 'state' AND ref_id IN
+        (SELECT id FROM character_states WHERE character_id = OLD.id);`,
+    ),
+    t(
+      "search_states_ai",
+      "AFTER INSERT ON character_states",
+      `
+      DELETE FROM search_index WHERE kind = 'state' AND ref_id = NEW.id;
+      ${searchInsertStates("WHERE s.id = NEW.id")}`,
+    ),
+    t(
+      "search_states_au",
+      "AFTER UPDATE ON character_states",
+      `
+      DELETE FROM search_index WHERE kind = 'state' AND ref_id = NEW.id;
+      ${searchInsertStates("WHERE s.id = NEW.id")}`,
+    ),
+    t(
+      "search_states_ad",
+      "AFTER DELETE ON character_states",
+      `
+      DELETE FROM search_index WHERE kind = 'state' AND ref_id = OLD.id;`,
+    ),
+  ].join("\n");
+}
+
+// Wipes and repopulates the whole index from the source tables. Exported for
+// tests; called from migrate() on every startup (D101).
+export function rebuildSearchIndex(sqlite: Database.Database): void {
+  sqlite.exec(`
+    DELETE FROM search_index;
+    ${searchInsertChapters("")}
+    ${searchInsertCanon("")}
+    ${searchInsertCharacters("")}
+    ${searchInsertStates("")}
+  `);
 }
 
 // Idempotent ALTER TABLE ADD COLUMN. SQLite has no ADD COLUMN IF NOT EXISTS, so

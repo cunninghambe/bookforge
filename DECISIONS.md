@@ -1219,6 +1219,71 @@ The startup-failure path (`main().catch`) also calls `captureException` and
 `captureException` before returning the existing MCP tool-error response; the
 response shape and message are unchanged.
 
+## Amendment A10: universal search and command palette
+
+### D101: One denormalized FTS5 table, trigger-maintained, rebuilt at migrate
+
+The index is a single FTS5 virtual table `search_index` (unindexed `kind`,
+`ref_id`, `project_id`, `meta`; indexed `title`, `body`; tokenizer
+`unicode61 remove_diacritics 2`) rather than external-content FTS per source
+table. External content does not fit here: a chapter's searchable body joins two
+tables (chapters plus the latest drafts row), and four separate FTS tables would
+push the UNION and ranking mess into every query. The copy cost of a contentful
+table is a few MB at novel scale. Sync is by SQL triggers on `chapters`,
+`drafts`, `canon_facts`, `characters`, and `character_states` (a character
+UPDATE also refreshes that character's state rows, whose titles carry the name),
+so no JS code path can write around the index. `migrate()` also wipes and
+rebuilds the whole index on every startup: it is O(project size), trivially
+cheap for a single user, guarantees pre-A10 databases are indexed on upgrade,
+and self-heals any drift. Porter stemming was considered and rejected: prefix
+queries operate on stemmed terms and can silently miss, and predictable verbatim
+recall matters more here than recall breadth.
+
+### D102: The sanitizer makes FTS syntax unreachable, and the last token is a prefix
+
+`toFtsQuery` tokenizes on whitespace, strips double quotes, control characters,
+and the operator characters `*` `^` `(` `)`, wraps each surviving token in
+double quotes (a phrase), and appends `*` to the final token when it has at
+least two characters, so the palette feels like typeahead while single-letter
+scans are avoided. Hyphens, apostrophes, and colons are deliberately KEPT:
+inside a quoted phrase they are plain token separators, exactly as they are in
+indexed content, so "well-worn" and "don't" match their prose forms. Operator
+words (AND/OR/NEAR) become quoted literals. Tokens are capped (first 8) to
+bound cost. A malformed MATCH expression is therefore impossible by
+construction, which is asserted by unit tests that feed operator soup and
+expect results or emptiness, never a throw. Queries that sanitize to nothing
+return `[]` without touching the database.
+
+### D103: meta stores raw DB values; 1-based conversion stays in chapterNumbering
+
+The `meta` column carries raw database fields (`orderIndex`, `chapterOrder`,
+statuses, types) as JSON written by the triggers. The A2 rule says the 0-based
+to 1-based conversion happens in exactly one place, so the query layer
+(`src/lib/search.ts`) converts with `orderToUiChapter` when shaping hits; the
+SQL never adds 1. All three surfaces (palette, `/api/search`, MCP `search`)
+speak 1-based chapter numbers because they all go through that layer.
+
+### D104: Snippet markers are control characters; each surface renders its own
+
+`snippet()` wraps matched ranges in U+0001/U+0002 (inserted via `char(1)` /
+`char(2)` so no SQL string literals are involved). Control characters cannot be
+typed into a novel, so they cannot collide with content. The palette splits on
+them and emits `<mark>` React elements (no `dangerouslySetInnerHTML` anywhere);
+the MCP tool replaces them with `**`. The API returns the raw markers so future
+consumers choose their own rendering.
+
+### D105: Palette wiring: window event from TopNav, hidden on /login, highlight deep-links
+
+The palette mounts once in the root layout (a client island) and owns the
+Ctrl/Cmd+K listener; the TopNav search button is a tiny client component that
+dispatches a `bookforge:open-palette` window event, avoiding any context
+plumbing through server components. The palette renders nothing on `/login`
+(usePathname check): the API would 401 there anyway. Canon and character hits
+deep-link as `?highlight=<id>`; the server pages pass that param into
+`CanonManager` / `CharactersManager`, which scroll the row into view and apply a
+temporary ring. Chapter hits land on the draft page, matching the sequencer's
+canonical link for a chapter.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

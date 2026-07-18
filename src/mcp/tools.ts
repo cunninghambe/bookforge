@@ -48,6 +48,13 @@ import { extractMarkers } from "../lib/llm/markers";
 import { assemblableCanon } from "../lib/repo/canon";
 import { orderToUiChapter, uiChapterToOrder } from "../lib/chapterNumbering";
 import { modelFor } from "../lib/modelFor";
+import {
+  SEARCH_KINDS,
+  SNIPPET_END,
+  SNIPPET_START,
+  searchIndex,
+  type SearchKind,
+} from "../lib/search";
 import { addBreadcrumb, captureException } from "../lib/uh-oh-client";
 
 type Db = BetterSQLite3Database<typeof schema>;
@@ -607,6 +614,37 @@ export const TOOL_DEFS: ToolDef[] = [
         missingFacts: markers.missingFacts,
         retried: r.retried,
         emDashUnresolved: hasEmDash(markers.clean),
+      };
+    },
+  },
+  {
+    name: "search",
+    description:
+      "Full-text search across chapters (title, pov, synopsis, summary, beats, latest draft prose), canon facts, characters, and character states (A10). Matched ranges in snippets are wrapped in **. Chapter numbers are 1-based. Retired canon is excluded unless includeRetired is true; a projectId scope keeps series-wide facts and characters visible. No LLM call.",
+    inputSchema: {
+      query: z.string().min(1),
+      kinds: z.array(z.enum(SEARCH_KINDS)).optional(),
+      projectId: z.number().int().optional(),
+      includeRetired: z.boolean().optional(),
+      limit: z.number().int().min(1).max(50).optional(),
+    },
+    handler: (ctx, args) => {
+      const hits = searchIndex(ctx.db, {
+        query: args.query as string,
+        kinds: args.kinds as SearchKind[] | undefined,
+        projectId: args.projectId as number | undefined,
+        includeRetired: args.includeRetired === true,
+        limit: args.limit as number | undefined,
+      });
+      return {
+        hits: hits.map((h) => ({
+          ...h,
+          snippet: h.snippet
+            .split(SNIPPET_START)
+            .join("**")
+            .split(SNIPPET_END)
+            .join("**"),
+        })),
       };
     },
   },

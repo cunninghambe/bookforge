@@ -478,3 +478,32 @@ Testing and acceptance:
 - A repo-level check (unit test or lint script run in npm test) asserting components contain no raw bg-white / bg-neutral- / border-neutral- / text-neutral- classes, so the token system cannot silently erode.
 - Screenshot evidence for review: a script or test that captures both themes across the main pages (login, canon, characters, chat, draft, review, settings) into a local folder for the orchestrator's visual review. Screenshots are review artifacts, not committed assertions.
 - The em-dash rule applies to all new UI copy.
+
+### A10 (2026-07-17): Universal search and command palette
+
+Purpose: instant recall across the whole project. The recurring question while writing Book 2 against Book 1's canon is "where did I establish this": a fact, a phrase in a locked chapter, what a character knew by chapter 4. Today that means paging through lists. This amendment adds local full-text search over everything the tool stores, surfaced three ways: a keyboard command palette in the web UI, a GET /api/search route, and a `search` MCP tool. No LLM calls anywhere in this feature; it is SQLite FTS5, instant and free.
+
+Indexed corpus, one row per source row:
+- Chapters: title plus a body of pov, synopsis, summary, beats, and the LATEST version of the chapter's draft prose (older versions are not searchable; superseded text must not produce hits).
+- Canon facts: content, with type and status carried as metadata. Retired facts stay indexed but are excluded from results by default (an includeRetired option includes them).
+- Characters: name plus role, voice_rules, physical, notes.
+- Character states: the owning character's name as title plus knows, feels, hiding. A hit carries the owning character id and the 1-based chapter the state is effective from.
+
+Index mechanics: an FTS5 virtual table (search_index) with unindexed kind / ref_id / project_id / meta columns and indexed title / body columns, tokenizer unicode61 with diacritics removal. It is kept live by database triggers on chapters, drafts, canon_facts, characters, and character_states (insert, update, delete; a character rename refreshes that character's state rows too), so no code path can write around the index. migrate() additionally rebuilds the whole index idempotently, so existing databases are indexed on first run after upgrade and any drift self-heals at startup. The meta column stores raw database values (0-based order fields); conversion to 1-based chapter numbers happens only at the query layer through the A2 chapterNumbering helpers.
+
+Query semantics, shared by all three surfaces (src/lib/search.ts):
+- Any input string is safe. The sanitizer tokenizes on whitespace, strips quotes and FTS operators, quotes every token as a phrase, and marks the final token as a prefix when it has at least two characters, so typing feels like typeahead. FTS syntax (AND, OR, NEAR, parentheses, asterisks) is never interpreted; a query that sanitizes to nothing returns no results. A malformed query must be impossible by construction, never a thrown FTS error.
+- Ranking is bm25 with title weighted above body. Each hit carries a snippet with the matched ranges marked (control characters U+0001 and U+0002 at the layer boundary; the palette renders them as highlighted segments, the MCP tool replaces them with **).
+- Filters: kinds (any subset of chapter, canon, character, state), projectId scope (keeps series-wide rows, which have no project, visible alongside the book's rows), includeRetired, and a clamped limit (default 20, max 50).
+
+Command palette (web): Ctrl+K or Cmd+K anywhere in the authed UI opens a centered overlay palette; a quiet Search affordance in TopNav (showing the shortcut) opens the same palette. It is not available on /login. Typing searches with a short debounce and a stale-response guard (the CanonManager sequence-guard pattern); results are grouped Chapters / Canon / Characters / Character states, plus a "Go to" group of static navigation commands (Canon, Characters, Books, Settings, Import bible) filtered by the query and shown alone when the query is empty. Arrow keys move the selection across groups, Enter opens the selected result, Esc (or backdrop click, or navigating) closes. Opening a result:
+- A chapter hit opens that chapter's draft page.
+- A canon hit opens /canon?highlight=<id>; the canon list scrolls to the row and highlights it briefly.
+- A character or state hit opens /characters?highlight=<characterId> with the same scroll-and-highlight treatment.
+Match highlighting is built from the marker segments as React elements (never raw HTML injection). A9 discipline applies: semantic tokens only, calm styling, visible focus, no new hues.
+
+MCP: a `search` tool over the same query layer (query, kinds, projectId, includeRetired, limit), returning compact JSON hits with 1-based chapter numbers per A2 and ** around matched ranges. It is read-only and does not touch the A6 human-only gate boundary. The A6 tool-surface tests extend to include it.
+
+Non-goals, recorded: no semantic or embedding search (FTS is the right tool for verbatim recall, and this feature must stay instant and free); no persisted search history; projects (the three book titles) are not indexed, the Books page lists them already.
+
+Acceptance check: with a chapter whose latest draft contains a distinctive word, Ctrl+K then typing that word surfaces the chapter and Enter lands on its draft page; overwriting the working draft to drop the word removes the hit (latest-version-only asserted); a retired canon fact is absent from default results and present with includeRetired; a canon hit deep-links to /canon with the target row highlighted; the MCP search tool returns the chapter hit with its 1-based number and ** markers; a query made of FTS operators and stray quotes returns cleanly (results or nothing, never an error); the palette is fully keyboard drivable (open, type, arrows, Enter) under the e2e suite.

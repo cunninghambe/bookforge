@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { orderToUiChapter, uiChapterToOrder } from "@/lib/chapterNumbering";
 
@@ -26,9 +26,20 @@ interface CharacterState {
   hiding: string | null;
 }
 
-export function CharactersManager({ projects }: { projects: Project[] }) {
+export function CharactersManager({
+  projects,
+  highlightId,
+}: {
+  projects: Project[];
+  highlightId?: number | null;
+}) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [adding, setAdding] = useState(false);
+  // A10: ?highlight=<characterId> scrolls to that card and flashes it briefly
+  // (D105). flashedForRef remembers which id was already flashed so re-renders
+  // do not re-flash, while a later deep-link to a different card still works.
+  const [flashId, setFlashId] = useState<number | null>(null);
+  const flashedForRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/characters");
@@ -39,6 +50,29 @@ export function CharactersManager({ projects }: { projects: Project[] }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // A deep-link can arrive as a soft navigation while this component is
+  // already mounted (palette open on /characters), pointing at a character
+  // created after the list was last fetched. Reload so the target card exists.
+  useEffect(() => {
+    if (highlightId && highlightId !== flashedForRef.current) load();
+  }, [highlightId, load]);
+
+  useEffect(() => {
+    if (
+      characters.length === 0 ||
+      !highlightId ||
+      flashedForRef.current === highlightId
+    )
+      return;
+    const el = document.getElementById(`character-${highlightId}`);
+    if (!el) return;
+    flashedForRef.current = highlightId;
+    el.scrollIntoView({ block: "center" });
+    setFlashId(highlightId);
+    const t = setTimeout(() => setFlashId(null), 2000);
+    return () => clearTimeout(t);
+  }, [characters, highlightId]);
 
   return (
     <div>
@@ -70,6 +104,7 @@ export function CharactersManager({ projects }: { projects: Project[] }) {
             character={c}
             projects={projects}
             onChanged={load}
+            flash={flashId === c.id}
           />
         ))}
       </div>
@@ -164,10 +199,12 @@ function CharacterCard({
   character,
   projects,
   onChanged,
+  flash,
 }: {
   character: Character;
   projects: Project[];
   onChanged: () => void;
+  flash?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [states, setStates] = useState<CharacterState[]>([]);
@@ -187,7 +224,10 @@ function CharacterCard({
 
   return (
     <div
-      className="rounded border border-edge-soft bg-surface p-4"
+      id={`character-${character.id}`}
+      className={`rounded border border-edge-soft bg-surface p-4${
+        flash ? " ring-2 ring-focus" : ""
+      }`}
       data-testid="character-card"
     >
       <div className="flex items-start justify-between">

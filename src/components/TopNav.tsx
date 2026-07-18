@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SearchTrigger } from "./SearchTrigger";
 import { ThemeToggle } from "./ThemeToggle";
 
 // Shared top navigation for authed pages. Calm and minimal.
@@ -26,6 +27,7 @@ export function TopNav({
         Settings
       </Link>
       <div className="ml-auto flex items-center gap-5">
+        <SearchTrigger />
         <ThemeToggle />
         <form action="/api/auth/logout" method="post">
           <button type="submit" className="btn-quiet">

@@ -25,8 +25,9 @@ const DATA_DIR = resolve(ROOT, "data");
 const DB_PATH = resolve(DATA_DIR, `mcp-test-${process.pid}-${Date.now()}.db`);
 const SERVER = resolve(ROOT, "src", "mcp", "server.ts");
 
-// Every tool the SPEC A6 list registers.
+// Every tool the SPEC A6 list registers, plus the A10 search tool.
 const EXPECTED_TOOLS = [
+  "search",
   "canon_list",
   "canon_add",
   "canon_lock",
@@ -285,6 +286,24 @@ describe("MCP server (A6) over stdio", () => {
     }>;
     expect(chapters.length).toBe(1);
     expect(chapters[0].contradictions[0].conflictingFact).toContain("single moon");
+  }, 30000);
+
+  it("search finds the locked chapter by its draft prose with ** markers (A10)", async () => {
+    const res = await call("search", { query: "twin moons" });
+    const hits = res.hits as Array<{
+      kind: string;
+      id: number;
+      chapter?: number;
+      title: string;
+      snippet: string;
+    }>;
+    const hit = hits.find((h) => h.kind === "chapter" && h.id === seeded.chapterA);
+    expect(hit).toBeTruthy();
+    expect(hit!.chapter).toBe(1); // 1-based per A2
+    expect(hit!.title).toBe("The Climb");
+    // Matched ranges are wrapped in ** (FTS5 may mark tokens separately or
+    // coalesce adjacent ones; both carry the markers around "twin").
+    expect(hit!.snippet).toMatch(/\*\*twin/i);
   }, 30000);
 
   it("an LLM-calling tool wrote a row to llm_calls", async () => {

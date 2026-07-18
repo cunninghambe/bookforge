@@ -34,12 +34,23 @@ const TYPE_LABEL: Record<CanonType, string> = {
   plot_decision: "plot",
 };
 
-export function CanonManager({ projects }: { projects: Project[] }) {
+export function CanonManager({
+  projects,
+  highlightId,
+}: {
+  projects: Project[];
+  highlightId?: number | null;
+}) {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterScope, setFilterScope] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  // A10: ?highlight=<id> scrolls to that fact and flashes it briefly (D105).
+  // flashedForRef remembers which id was already flashed so re-renders do not
+  // re-flash, while a later deep-link to a different fact still works.
+  const [flashId, setFlashId] = useState<number | null>(null);
+  const flashedForRef = useRef<number | null>(null);
   // Sequence guard: filter changes can fire overlapping /api/canon requests.
   // Only the response for the most recently issued request is applied, so a
   // late-arriving response for a stale filter combination cannot overwrite
@@ -63,6 +74,24 @@ export function CanonManager({ projects }: { projects: Project[] }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  // A deep-link can arrive as a soft navigation while this component is
+  // already mounted (palette open on /canon), pointing at a fact created
+  // after the list was last fetched. Reload so the target row exists.
+  useEffect(() => {
+    if (highlightId && highlightId !== flashedForRef.current) load();
+  }, [highlightId, load]);
+
+  useEffect(() => {
+    if (loading || !highlightId || flashedForRef.current === highlightId) return;
+    const el = document.getElementById(`fact-${highlightId}`);
+    if (!el) return;
+    flashedForRef.current = highlightId;
+    el.scrollIntoView({ block: "center" });
+    setFlashId(highlightId);
+    const t = setTimeout(() => setFlashId(null), 2000);
+    return () => clearTimeout(t);
+  }, [loading, highlightId]);
 
   const scopeLabel = (projectId: number | null) =>
     projectId === null
@@ -96,6 +125,7 @@ export function CanonManager({ projects }: { projects: Project[] }) {
             fact={f}
             scopeLabel={scopeLabel(f.projectId)}
             onChanged={load}
+            flash={flashId === f.id}
           />
         ))}
       </ul>
@@ -252,9 +282,11 @@ function CanonRow({
   fact,
   scopeLabel,
   onChanged,
+  flash,
 }: {
   fact: Fact;
   scopeLabel: string;
+  flash?: boolean;
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -279,7 +311,10 @@ function CanonRow({
 
   return (
     <li
-      className={`flex items-start gap-3 py-3 text-sm ${retired ? "opacity-50" : ""}`}
+      id={`fact-${fact.id}`}
+      className={`flex items-start gap-3 py-3 text-sm ${retired ? "opacity-50" : ""}${
+        flash ? " rounded ring-2 ring-focus" : ""
+      }`}
       data-testid="canon-row"
       data-status={fact.status}
       data-type={fact.type}
