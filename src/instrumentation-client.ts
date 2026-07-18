@@ -6,6 +6,8 @@ import { UH_OH_RELEASE } from "./lib/uh-oh-release";
 // without a DSN is a silent no-op: no listeners installed, no console noise, no
 // behavior change, until NEXT_PUBLIC_UH_OH_DSN is set at build time.
 init({
+  // Privacy-first usage analytics (cookie-less; no client IDs). v0.6.
+  analytics: { auto: true },
   dsn: process.env.NEXT_PUBLIC_UH_OH_DSN,
   release: UH_OH_RELEASE,
   environment: process.env.NODE_ENV,
