@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
 import { login } from "./helpers";
 
-// Amendment A10: universal search + command palette. Data is created through
+// Amendment A11: universal search + command palette. Data is created through
 // the API with the page's session cookies; the fixture LLM is never involved
 // (search makes no LLM calls).
 
-test.describe("A10 universal search and command palette", () => {
+test.describe("A11 universal search and command palette", () => {
   test("finds chapter prose, navigates by keyboard, and drops superseded drafts", async ({
     page,
   }) => {

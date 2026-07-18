@@ -12,7 +12,7 @@ export default async function CanonPage({
 }) {
   const db = getDb();
   const projects = listProjects(db).map((p) => ({ id: p.id, title: p.title }));
-  // A10: a search hit deep-links as /canon?highlight=<factId>; the manager
+  // A11: a search hit deep-links as /canon?highlight=<factId>; the manager
   // scrolls to and briefly flashes that row.
   const { highlight } = await searchParams;
   const highlightId = Number(highlight);

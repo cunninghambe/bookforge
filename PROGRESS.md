@@ -1485,12 +1485,97 @@ and read server-side (D94); focus is a global focus-visible outline plus explici
 rings on the approval rows (D95); the favicon is an inline data URI so it is not
 gated by middleware on the login page (D97).
 
+## 2026-07-14: Amendment A10, chat session reuse on the claude-code transport
+
+Builds the A5.1 deferred item. One CLI session per chat conversation: the chat
+client rotates a conversationId on every pin change and sends it each turn; the
+route asks the transport's optional hasSession(key) and on a hit sends only the
+new author message (buildChatResumeRemainder), letting the resumed session carry
+the character context and prior turns; the transport (ClaudeCodeClient) maps
+sessionKey to CLI session id in a bounded SessionStore, spawns fresh sessionful
+calls without --no-session-persistence, resumes with --resume <id> and no
+re-passed system prompt, and recovers from "No conversation found" by dropping
+the entry and rerunning fresh (stream restart only before the first yielded
+delta). The em-dash retry rides the session too, sending the correction alone.
+Every non-chat purpose passes no sessionKey and produces byte-identical argv to
+pre-A10 (unit-asserted).
+
+- CLI behavior verified against claude 2.1.209 before coding (A7 rule):
+  session_id round-trip, codeword recall across resume, system-prompt retention,
+  nonzero cache_read_input_tokens on resume, missing-session failure shapes.
+- Counts: unit 250 to 261 (+11). tsc clean, build clean, e2e unchanged (the
+  fixture client has no hasSession, so fixture-driven routes take the pre-A10
+  path by construction).
+- Real-transport verification (manual, per A7): an 8-turn chat with one
+  conversationId went from the one-shot signature (cache writes growing every
+  turn, zero reads) to steady-state resumes: from turn 3 onward each turn wrote
+  only ~700 to 1200 tokens (the new exchange) while reading 12k to 16.5k from
+  cache. A browser-driven pass (camofox, real login/pin/send flow) confirmed the
+  UI-generated conversationId engages the same path, with in-voice canon-grounded
+  replies and the missing-fact note surfacing in the UI.
+- Found in verification, fixed before commit: rawStream's returned CompleteResult
+  rebuilt the object field by field and dropped sessionId, so the store never
+  learned the session and every stream turn ran fresh. One line (carry
+  sessionId through) plus a parseStreamEvent unit test pinning session_id
+  passthrough. Unit count 261 to 262.
+
+### Judgment calls
+
+See D98 and D99: the route asks, the transport owns; resumed calls never re-pass
+the system prompt; recovery is lossless because the client transcript still rides
+every turn; MCP character_chat stays stateless.
+
+## 2026-07-15: Chat reliability audit (broken partial reply, wedged composer)
+
+Field report: a fresh conversation's first reply rendered partially and the
+composer never re-enabled. Reproduced with a real browser (camofox) against the
+deployed app; curl against the same endpoints never failed, which is itself the
+clue: only real browsers negotiate beyond HTTP/1.1.
+
+Root causes, two independent layers:
+
+1. Client (the wedge): CharacterChat.send() had no try/catch/finally around the
+   fetch and the read loop. Any mid-stream failure (connection reset, proxy
+   hiccup) escaped the handler, so setStreaming(false) never ran: the partial
+   text stayed rendered and Send stayed disabled forever. The failure itself was
+   invisible server-side because the route kept pumping to a dead controller.
+2. Infrastructure (the trigger): Caddy advertises HTTP/3 (alt-svc h3, cached by
+   browsers for 30 days) and listens on UDP 443, but the firewall only allowed
+   443/tcp, so QUIC traffic blackholed. Browsers that upgraded after their first
+   visit got dying streams; curl (HTTP/1.1) never saw it. Fixed at the box:
+   allow 443/udp. This affected every site behind this Caddy, not just chat.
+
+Hardening shipped with the fix:
+
+- The stream protocol parsing moved out of the component into a pure, tested
+  ChatStreamParser (src/lib/chatStream.ts): visibleText() never renders a
+  partially received control delimiter (a chunk boundary can split it), and
+  finish() classifies ended-without-frame and unparseable-frame outcomes.
+- send() is now fully guarded: non-OK responses surface their JSON error; a
+  connection cut mid-stream keeps the partial text and appends a plain note
+  that the reply was cut off; every path lands in a finally that re-enables
+  the composer. The author can always just keep chatting.
+- The route writes through a guard (a closed controller no longer throws into
+  the pump), logs stream failures to the server console (they were previously
+  silent), and implements cancel(): a client that disconnects mid-stream stops
+  the underlying generator.
+- The claude-code transport kills its CLI child when its stream generator is
+  closed early (route cancel or wrapper abandonment), instead of leaving an
+  orphan burning tokens with nobody reading. The session-resume wrapper closes
+  its inner generator explicitly for the same reason.
+
+Verified end to end with a real browser: a fresh conversation completes; a
+mid-turn kill -9 of the CLI child renders a visible error turn and the very
+next message works and still resumes the session (cache read 13941 tokens,
+write 34). Unit count 262 to 272 (ChatStreamParser four-shape contract).
+
 ---
 
-## Amendment A10: Universal search and command palette
+## Amendment A11: Universal search and command palette
 
-Status: COMPLETE. 277 unit tests and 39 e2e tests pass; tsc clean; no LLM calls
-anywhere in the feature.
+Status: COMPLETE. Merged with the chat-session A10 line; the combined tree runs
+299 unit tests and 39 e2e tests, tsc clean. No LLM calls anywhere in the
+feature.
 
 ### What was built
 
@@ -1499,7 +1584,7 @@ anywhere in the feature.
   (title, pov, synopsis, summary, beats, LATEST draft prose), canon facts,
   characters, and character states (titled by the owning character). Kept live
   by SQL triggers on all five source tables (a character rename refreshes its
-  state rows), and wiped-and-rebuilt in `migrate()` on every startup so pre-A10
+  state rows), and wiped-and-rebuilt in `migrate()` on every startup so pre-A11
   databases index themselves on upgrade and drift self-heals. `meta` stores raw
   0-based values; `src/lib/search.ts` converts via chapterNumbering (A2).
 - Query layer. `src/lib/search.ts`: `toFtsQuery` sanitizer (quoted phrases,
@@ -1526,17 +1611,24 @@ anywhere in the feature.
   scoping, limit clamp, marker snippets, rebuild and migrate idempotence.
 - `tests/unit/mcp-tools.test.ts` (+4) and the stdio acceptance test (+1) cover
   the MCP tool, including retired-by-default and 1-based numbers.
-- New e2e `tests/e2e/a10.spec.ts` (3): prose search to the draft page with a
+- New e2e `tests/e2e/a11.spec.ts` (3): prose search to the draft page with a
   superseded-draft negative check, canon deep-link with row highlight, Esc /
   TopNav reopen / arrows / Enter quick-nav to /settings.
-- Counts: unit 250 to 277 (+27), e2e 36 to 39 (+3). tsc clean.
+- Counts: +27 unit and +3 e2e on the A9 base; the merged tree (chat A10 line
+  plus this) runs 299 unit and 39 e2e. tsc clean.
 
 ### Judgment calls
 
-See D101 through D105 in DECISIONS.md: one denormalized trigger-maintained FTS
-table rebuilt at migrate (D101); the sanitizer strips or quotes everything and
-keeps hyphens/apostrophes/colons so prose-like queries match prose (D102);
-1-based conversion stays in chapterNumbering (D103); snippet markers are
-control characters rendered per surface (D104); the palette is a root-layout
+See D103 through D107 in DECISIONS.md: one denormalized trigger-maintained FTS
+table rebuilt at migrate (D103); the sanitizer strips or quotes everything and
+keeps hyphens/apostrophes/colons so prose-like queries match prose (D104);
+1-based conversion stays in chapterNumbering (D105); snippet markers are
+control characters rendered per surface (D106); the palette is a root-layout
 client island opened by a window event, hidden on /login, with ?highlight
-deep-links that reload the target list when it is stale (D105).
+deep-links that reload the target list when it is stale (D107).
+
+This amendment was developed concurrently with the chat-session work and both
+initially claimed the A10 number (and the uh-oh wiring and the chat work both
+claimed D98/D99). Resolved at merge time: chat session reuse keeps A10 and
+D98/D99 (it landed on master first), the uh-oh wiring decisions became D100
+through D102, and universal search became A11 with D103 through D107.

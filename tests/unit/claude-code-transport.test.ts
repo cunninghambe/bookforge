@@ -257,3 +257,152 @@ describe("parseStreamEvent", () => {
     expect(parseStreamEvent("{broken").kind).toBe("other");
   });
 });
+
+// ---- A10: session reuse ----------------------------------------------------
+
+import { SessionStore } from "@/lib/llm/client";
+
+describe("buildCliArgs A10 session variants", () => {
+  it("with neither session option the argv is byte-identical to the pre-A10 shape", () => {
+    expect(
+      buildCliArgs({ model: "m1", system: "S", streaming: false }),
+    ).toEqual([
+      "--print",
+      "--model",
+      "m1",
+      "--max-turns",
+      "1",
+      "--no-session-persistence",
+      "--tools",
+      "",
+      "--output-format",
+      "json",
+      "--system-prompt",
+      "S",
+    ]);
+  });
+
+  it("persistSession omits --no-session-persistence and keeps everything else", () => {
+    const args = buildCliArgs({
+      model: "m1",
+      system: "S",
+      streaming: false,
+      persistSession: true,
+    });
+    expect(args).not.toContain("--no-session-persistence");
+    expect(args).toContain("--system-prompt");
+    expect(args).toContain("--tools");
+  });
+
+  it("resumeSessionId adds --resume, omits session-persistence opt-out AND the system prompt", () => {
+    const args = buildCliArgs({
+      model: "m1",
+      system: "S",
+      streaming: true,
+      persistSession: true,
+      resumeSessionId: "abc-123",
+    });
+    expect(args).toContain("--resume");
+    expect(args[args.indexOf("--resume") + 1]).toBe("abc-123");
+    expect(args).not.toContain("--no-session-persistence");
+    // The session retains the original system prompt; it is never re-passed.
+    expect(args).not.toContain("--system-prompt");
+  });
+});
+
+describe("parseCliResult A10 session id and errors detail", () => {
+  it("captures session_id on success", () => {
+    const r = parseCliResult({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "OK",
+      session_id: "507f28c6-bc86-47ba-a0b3-9d9134925487",
+      usage: { input_tokens: 3, output_tokens: 5 },
+    });
+    expect(r.sessionId).toBe("507f28c6-bc86-47ba-a0b3-9d9134925487");
+  });
+
+  it("leaves sessionId undefined when absent or empty", () => {
+    const r = parseCliResult({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "OK",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    expect(r.sessionId).toBeUndefined();
+  });
+
+  it("surfaces the errors array detail when status and result are absent (missing-session shape)", () => {
+    // Captured from claude 2.1.209: --resume of a nonexistent session in
+    // stream-json mode.
+    const failed = {
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      session_id: "00000000-0000-0000-0000-000000000000",
+      errors: [
+        "No conversation found with session ID: 00000000-0000-0000-0000-000000000000",
+      ],
+    };
+    expect(() => parseCliResult(failed)).toThrowError(
+      /No conversation found with session ID/,
+    );
+  });
+});
+
+describe("SessionStore", () => {
+  it("stores, reports, and deletes session ids per key", () => {
+    const s = new SessionStore();
+    expect(s.has("a")).toBe(false);
+    s.set("a", "sid-1");
+    expect(s.has("a")).toBe(true);
+    expect(s.get("a")).toBe("sid-1");
+    s.set("a", "sid-2");
+    expect(s.get("a")).toBe("sid-2");
+    s.delete("a");
+    expect(s.has("a")).toBe(false);
+  });
+
+  it("evicts the oldest entry past the cap", () => {
+    const s = new SessionStore(3);
+    s.set("k1", "s1");
+    s.set("k2", "s2");
+    s.set("k3", "s3");
+    s.set("k4", "s4");
+    expect(s.size).toBe(3);
+    expect(s.has("k1")).toBe(false);
+    expect(s.has("k4")).toBe(true);
+  });
+
+  it("re-setting an existing key refreshes its eviction position", () => {
+    const s = new SessionStore(2);
+    s.set("k1", "s1");
+    s.set("k2", "s2");
+    s.set("k1", "s1b"); // refresh k1: k2 is now oldest
+    s.set("k3", "s3");
+    expect(s.has("k1")).toBe(true);
+    expect(s.has("k2")).toBe(false);
+  });
+});
+
+describe("parseStreamEvent A10 session id", () => {
+  it("the stream result event carries session_id through to the CompleteResult", () => {
+    const line = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "OK",
+      session_id: "cac3265f-d58c-44bd-91de-5252189a43a5",
+      usage: { input_tokens: 3, output_tokens: 5 },
+    });
+    const parsed = parseStreamEvent(line);
+    expect(parsed.kind).toBe("result");
+    if (parsed.kind === "result") {
+      expect(parsed.result.sessionId).toBe(
+        "cac3265f-d58c-44bd-91de-5252189a43a5",
+      );
+    }
+  });
+});

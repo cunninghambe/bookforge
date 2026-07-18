@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 
-// Amendment A10: the quiet search affordance in TopNav. The palette itself
+// Amendment A11: the quiet search affordance in TopNav. The palette itself
 // lives in the root layout; this button just asks it to open via the window
-// event contract (D105).
+// event contract (D107).
 export function SearchTrigger() {
   const [isMac, setIsMac] = useState(false);
   useEffect(() => {

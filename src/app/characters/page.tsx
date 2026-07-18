@@ -12,7 +12,7 @@ export default async function CharactersPage({
 }) {
   const db = getDb();
   const projects = listProjects(db).map((p) => ({ id: p.id, title: p.title }));
-  // A10: a search hit deep-links as /characters?highlight=<characterId>; the
+  // A11: a search hit deep-links as /characters?highlight=<characterId>; the
   // manager scrolls to and briefly flashes that card.
   const { highlight } = await searchParams;
   const highlightId = Number(highlight);

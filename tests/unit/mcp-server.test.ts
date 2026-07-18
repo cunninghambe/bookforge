@@ -25,7 +25,7 @@ const DATA_DIR = resolve(ROOT, "data");
 const DB_PATH = resolve(DATA_DIR, `mcp-test-${process.pid}-${Date.now()}.db`);
 const SERVER = resolve(ROOT, "src", "mcp", "server.ts");
 
-// Every tool the SPEC A6 list registers, plus the A10 search tool.
+// Every tool the SPEC A6 list registers, plus the A11 search tool.
 const EXPECTED_TOOLS = [
   "search",
   "canon_list",
@@ -288,7 +288,7 @@ describe("MCP server (A6) over stdio", () => {
     expect(chapters[0].contradictions[0].conflictingFact).toContain("single moon");
   }, 30000);
 
-  it("search finds the locked chapter by its draft prose with ** markers (A10)", async () => {
+  it("search finds the locked chapter by its draft prose with ** markers (A11)", async () => {
     const res = await call("search", { query: "twin moons" });
     const hits = res.hits as Array<{
       kind: string;

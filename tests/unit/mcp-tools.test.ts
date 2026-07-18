@@ -52,7 +52,7 @@ function tool(name: string) {
 }
 
 describe("MCP tool surface", () => {
-  it("registers exactly the SPEC A6 tools plus A10 search", () => {
+  it("registers exactly the SPEC A6 tools plus A11 search", () => {
     expect([...TOOL_NAMES].sort()).toEqual(
       [
         "search",
@@ -257,7 +257,7 @@ describe("tool behavior and shaping", () => {
   });
 });
 
-describe("search tool (A10)", () => {
+describe("search tool (A11)", () => {
   interface Hit {
     kind: string;
     id: number;

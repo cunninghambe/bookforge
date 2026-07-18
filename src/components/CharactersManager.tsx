@@ -35,8 +35,8 @@ export function CharactersManager({
 }) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [adding, setAdding] = useState(false);
-  // A10: ?highlight=<characterId> scrolls to that card and flashes it briefly
-  // (D105). flashedForRef remembers which id was already flashed so re-renders
+  // A11: ?highlight=<characterId> scrolls to that card and flashes it briefly
+  // (D107). flashedForRef remembers which id was already flashed so re-renders
   // do not re-flash, while a later deep-link to a different card still works.
   const [flashId, setFlashId] = useState<number | null>(null);
   const flashedForRef = useRef<number | null>(null);

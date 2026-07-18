@@ -6,7 +6,12 @@ import { getLlmClient, type CompleteResult } from "@/lib/llm/client";
 import { modelFor } from "@/lib/modelFor";
 import { hasEmDash } from "@/lib/llm/lint";
 import { CONTROL_DELIM, extractMarkers } from "@/lib/llm/markers";
-import { buildChatContext, buildChatRemainder, type ChatTurn } from "@/lib/chat";
+import {
+  buildChatContext,
+  buildChatRemainder,
+  buildChatResumeRemainder,
+  type ChatTurn,
+} from "@/lib/chat";
 import { validatePinChapter, pinRangeLabel } from "@/lib/chatPin";
 
 // Character chatbot turn (Amendment A5). Body: { projectId, uiChapter, history,
@@ -41,6 +46,13 @@ export async function POST(
   const message = typeof body.message === "string" ? body.message : "";
   const fixtureKey =
     typeof body.fixtureKey === "string" ? body.fixtureKey : undefined;
+  // A10: opaque per-conversation id from the client (rotated on every pin
+  // change). Invalid shapes are ignored, which just means no session reuse.
+  const conversationId =
+    typeof body.conversationId === "string" &&
+    /^[A-Za-z0-9-]{8,64}$/.test(body.conversationId)
+      ? body.conversationId
+      : undefined;
   const history: ChatTurn[] = Array.isArray(body.history)
     ? (body.history as unknown[])
         .map((h) => {
@@ -83,25 +95,61 @@ export async function POST(
     projectId,
     uiChapter,
   });
-  const remainder = buildChatRemainder({
-    characterName: character.name,
-    history,
-    message,
-  });
 
   const client = getLlmClient();
   const model = modelFor(db, "chat");
+
+  // A10: one CLI session per conversation on the claude-code transport. When the
+  // transport already holds a session for this conversation, only the new author
+  // message is sent (the session carries the context and prior turns); otherwise
+  // the full transcript remainder seeds a fresh session, exactly as before.
+  // Transports without hasSession (fixture, api-key) always take the full path.
+  const sessionKey = conversationId
+    ? `chat:${characterId}:${conversationId}`
+    : undefined;
+  const resuming =
+    sessionKey !== undefined && (client.hasSession?.(sessionKey) ?? false);
+  const remainder = resuming
+    ? buildChatResumeRemainder({ characterName: character.name, message })
+    : buildChatRemainder({
+        characterName: character.name,
+        history,
+        message,
+      });
   const encoder = new TextEncoder();
+
+  // The generator currently being pumped, reachable from cancel() so a client
+  // that disconnects mid-stream stops the underlying work (on the claude-code
+  // transport, abandoning the generator kills the CLI child) instead of leaving
+  // it running unobserved.
+  let activeGen: AsyncGenerator<string, CompleteResult, unknown> | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // After a client disconnect the controller is closed and enqueue throws;
+      // that must not blow up the pump or mask the real error, so every write
+      // goes through this guard.
+      let writable = true;
+      const write = (text: string) => {
+        if (!writable) return;
+        try {
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          writable = false;
+        }
+      };
       const pump = async (
         gen: AsyncGenerator<string, CompleteResult, unknown>,
       ): Promise<CompleteResult> => {
-        while (true) {
-          const { value, done } = await gen.next();
-          if (done) return value;
-          controller.enqueue(encoder.encode(value));
+        activeGen = gen;
+        try {
+          while (true) {
+            const { value, done } = await gen.next();
+            if (done) return value;
+            write(value);
+          }
+        } finally {
+          activeGen = null;
         }
       };
 
@@ -118,6 +166,7 @@ export async function POST(
             prompt: remainder,
             maxTokens: 1024,
             fixtureKey,
+            sessionKey,
           }),
         );
         let finalText = r1.text;
@@ -130,22 +179,29 @@ export async function POST(
         // Em-dash lint: hard reject, auto-retry once.
         if (hasEmDash(finalText)) {
           retried = true;
-          controller.enqueue(
-            encoder.encode(
-              "\n\n[em-dash detected in the reply, regenerating without it]\n\n",
-            ),
+          write(
+            "\n\n[em-dash detected in the reply, regenerating without it]\n\n",
           );
+          // A10: after r1 the transport may now hold this conversation's
+          // session (r1 seeded it), so the correction rides the session alone
+          // rather than re-sending the transcript. Sessionless transports keep
+          // the full remainder exactly as before.
+          const correction =
+            "IMPORTANT: your previous reply used an em-dash, which is forbidden. Reply again using commas, colons, full stops, or restructured sentences. No em-dashes.";
+          const retryPrompt =
+            sessionKey !== undefined && (client.hasSession?.(sessionKey) ?? false)
+              ? correction
+              : remainder + "\n\n" + correction;
           const r2 = await pump(
             client.stream({
               purpose: "chat",
               model,
               system: context.system,
               promptPrefix: context.contextPrefix,
-              prompt:
-                remainder +
-                "\n\nIMPORTANT: your previous reply used an em-dash, which is forbidden. Reply again using commas, colons, full stops, or restructured sentences. No em-dashes.",
+              prompt: retryPrompt,
               maxTokens: 1024,
               fixtureKey: fixtureKey ? `${fixtureKey}.retry` : undefined,
+              sessionKey,
             }),
           );
           finalText = r2.text;
@@ -175,18 +231,26 @@ export async function POST(
           emDashUnresolved: stillHasEmDash,
           missingFacts: markers.missingFacts,
         };
-        controller.enqueue(
-          encoder.encode(CONTROL_DELIM + JSON.stringify(control)),
-        );
-        controller.close();
+        write(CONTROL_DELIM + JSON.stringify(control));
       } catch (err) {
-        controller.enqueue(
-          encoder.encode(
-            CONTROL_DELIM + JSON.stringify({ error: (err as Error).message }),
-          ),
-        );
-        controller.close();
+        // Log server-side (pm2) so a failed turn is diagnosable; before this the
+        // only trace of a mid-stream failure was the client's behavior.
+        console.error("chat stream failed:", err);
+        write(CONTROL_DELIM + JSON.stringify({ error: (err as Error).message }));
       }
+      try {
+        controller.close();
+      } catch {
+        // Already closed by a client disconnect.
+      }
+    },
+    cancel() {
+      // The client went away mid-stream: stop the generator so the underlying
+      // work stops too (the claude-code transport kills its CLI child when the
+      // generator is closed early).
+      const gen = activeGen;
+      activeGen = null;
+      if (gen) void gen.return(undefined as unknown as CompleteResult);
     },
   });
 

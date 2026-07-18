@@ -29,7 +29,7 @@ export default async function RootLayout({
     <html lang="en" className={isDark ? "dark" : undefined}>
       <body className="font-sans antialiased">
         <div className="mx-auto max-w-5xl px-6">{children}</div>
-        {/* A10: the command palette overlay (Ctrl/Cmd+K), one instance app-wide. */}
+        {/* A11: the command palette overlay (Ctrl/Cmd+K), one instance app-wide. */}
         <CommandPalette />
       </body>
     </html>

@@ -3,21 +3,12 @@
 import { useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { validatePinChapter, pinRangeLabel } from "@/lib/chatPin";
-
-const CONTROL_DELIM = "\n<<<BOOKFORGE_CTRL>>>\n";
+import { ChatStreamParser } from "@/lib/chatStream";
 
 interface Project {
   id: number;
   title: string;
   chapterCount: number;
-}
-
-interface ControlFrame {
-  finalText: string;
-  retried: boolean;
-  emDashUnresolved: boolean;
-  missingFacts: string[];
-  error?: string;
 }
 
 interface Turn {
@@ -60,6 +51,10 @@ export function CharacterChat({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
+  // A10: opaque id for the current conversation, rotated whenever the pin is
+  // set or changed, so the server can reuse one transport session per
+  // conversation. The full transcript still rides along every turn.
+  const [conversationId, setConversationId] = useState("");
 
   // Draft pin form values (before the moment is set).
   const [formProject, setFormProject] = useState<string>(
@@ -91,9 +86,11 @@ export function CharacterChat({
     const uiChapter = check.clamped;
     setFormChapter(String(uiChapter));
     // Changing the pin starts a fresh conversation: state boundaries differ, so a
-    // transcript from another moment would leak (SPEC A5).
+    // transcript from another moment would leak (SPEC A5). Rotating the
+    // conversationId also drops any transport session from the prior moment (A10).
     setTurns([]);
     setStreamText("");
+    setConversationId(crypto.randomUUID());
     setPin({ projectId, uiChapter });
   }
 
@@ -101,6 +98,7 @@ export function CharacterChat({
     setPin(null);
     setTurns([]);
     setStreamText("");
+    setConversationId("");
   }
 
   const pinnedProjectTitle = useMemo(() => {
@@ -120,66 +118,83 @@ export function CharacterChat({
     setStreaming(true);
     setStreamText("");
 
-    const res = await fetch(`/api/characters/${characterId}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: pin.projectId,
-        uiChapter: pin.uiChapter,
-        history,
-        message,
-        fixtureKey,
-      }),
-    });
+    // Every path out of this block, including a thrown fetch or a connection
+    // cut mid-stream, must land in the finally: the finally is what re-enables
+    // Send. Before this hardening, a mid-stream network failure escaped the
+    // handler and wedged the chat permanently (streaming stayed true).
+    const parser = new ChatStreamParser();
+    let reply: Turn;
+    try {
+      const res = await fetch(`/api/characters/${characterId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: pin.projectId,
+          uiChapter: pin.uiChapter,
+          history,
+          message,
+          fixtureKey,
+          conversationId: conversationId || undefined,
+        }),
+      });
 
-    if (!res.body) {
-      setStreaming(false);
-      setTurns((prev) => [
-        ...prev,
-        { role: "assistant", text: "(no response)" },
-      ]);
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const delimIdx = buffer.indexOf(CONTROL_DELIM);
-      if (delimIdx === -1) {
-        setStreamText(buffer);
+      if (!res.ok || !res.body) {
+        let detail = `HTTP ${res.status}`;
+        try {
+          const j = (await res.json()) as { error?: string };
+          if (j?.error) detail = j.error;
+        } catch {
+          // Non-JSON error body: the status code is the best detail we have.
+        }
+        reply = { role: "assistant", text: `(error: ${detail})` };
       } else {
-        setStreamText(buffer.slice(0, delimIdx));
-      }
-    }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          parser.push(decoder.decode(value, { stream: true }));
+          setStreamText(parser.visibleText());
+        }
+        parser.push(decoder.decode());
 
-    const delimIdx = buffer.indexOf(CONTROL_DELIM);
-    let reply: Turn = { role: "assistant", text: buffer };
-    if (delimIdx !== -1) {
-      try {
-        const control = JSON.parse(
-          buffer.slice(delimIdx + CONTROL_DELIM.length),
-        ) as ControlFrame;
-        if (control.error) {
-          reply = { role: "assistant", text: `(error: ${control.error})` };
-        } else {
+        const end = parser.finish();
+        if (end.control?.error) {
+          reply = { role: "assistant", text: `(error: ${end.control.error})` };
+        } else if (end.control) {
           reply = {
             role: "assistant",
-            text: control.finalText,
-            missingFacts: control.missingFacts ?? [],
-            emDashUnresolved: control.emDashUnresolved,
+            text: end.control.finalText ?? "",
+            missingFacts: end.control.missingFacts ?? [],
+            emDashUnresolved: end.control.emDashUnresolved,
+          };
+        } else {
+          // The stream ended without a control frame (server cut off, or the
+          // frame was unparseable): keep whatever text arrived and say so, so
+          // the author knows the reply may be incomplete and can just retry.
+          const partial = end.text.trim();
+          reply = {
+            role: "assistant",
+            text: partial
+              ? `${partial}\n\n(the reply was cut off; you can keep chatting)`
+              : "(no response; you can try again)",
           };
         }
-      } catch {
-        reply = { role: "assistant", text: buffer.slice(0, delimIdx) };
       }
+    } catch (err) {
+      const partial = parser.visibleText().trim();
+      const detail = err instanceof Error ? err.message : String(err);
+      reply = {
+        role: "assistant",
+        text: partial
+          ? `${partial}\n\n(connection interrupted: ${detail}; the reply may be incomplete, you can keep chatting)`
+          : `(connection interrupted: ${detail}; you can try again)`,
+      };
+    } finally {
+      setStreamText("");
+      setStreaming(false);
     }
     setTurns((prev) => [...prev, reply]);
-    setStreamText("");
-    setStreaming(false);
   }
 
   return (

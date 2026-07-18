@@ -46,7 +46,7 @@ export function CanonManager({
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterScope, setFilterScope] = useState<string>("all");
   const [loading, setLoading] = useState(true);
-  // A10: ?highlight=<id> scrolls to that fact and flashes it briefly (D105).
+  // A11: ?highlight=<id> scrolls to that fact and flashes it briefly (D107).
   // flashedForRef remembers which id was already flashed so re-renders do not
   // re-flash, while a later deep-link to a different fact still works.
   const [flashId, setFlashId] = useState<number | null>(null);

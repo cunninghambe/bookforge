@@ -12,10 +12,10 @@ import { createCharacter, addState } from "@/lib/repo/characters";
 import { createChapter, updateChapter } from "@/lib/repo/chapters";
 import { createDraftVersion, saveWorkingDraft } from "@/lib/repo/drafts";
 
-// Amendment A10: the FTS5 index (trigger sync + rebuild) and the query layer.
+// Amendment A11: the FTS5 index (trigger sync + rebuild) and the query layer.
 // Distinctive words are used throughout so the seeded style rules never match.
 
-describe("toFtsQuery sanitizer (D102)", () => {
+describe("toFtsQuery sanitizer (D104)", () => {
   it("quotes tokens and prefixes the final one", () => {
     expect(toFtsQuery("silver locket")).toBe('"silver" "locket"*');
   });

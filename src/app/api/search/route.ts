@@ -7,9 +7,9 @@ import {
   type SearchKind,
 } from "@/lib/search";
 
-// Amendment A10: full-text search over the whole project. Sits behind the
+// Amendment A11: full-text search over the whole project. Sits behind the
 // session gate like every other /api route. Each hit gains the app URL the
-// palette navigates to; snippets keep the layer's marker characters (D104).
+// palette navigates to; snippets keep the layer's marker characters (D106).
 
 function urlFor(hit: SearchHit): string {
   switch (hit.kind) {

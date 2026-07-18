@@ -5,7 +5,7 @@ import { orderToUiChapter } from "./chapterNumbering";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
-// Amendment A10: the one query layer over the FTS5 search_index. All three
+// Amendment A11: the one query layer over the FTS5 search_index. All three
 // surfaces (the command palette, /api/search, and the MCP search tool) go
 // through searchIndex(), so they share sanitization, ranking, filtering, and
 // the A2 1-based chapter conversion.
@@ -13,7 +13,7 @@ type Db = BetterSQLite3Database<typeof schema>;
 export const SEARCH_KINDS = ["chapter", "canon", "character", "state"] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
-// Snippet marker characters at the layer boundary (D104). Control characters
+// Snippet marker characters at the layer boundary (D106). Control characters
 // cannot appear in real content, so they cannot collide. The palette turns
 // them into <mark> segments; the MCP tool replaces them with **.
 export const SNIPPET_START = "\u0001";
@@ -50,7 +50,7 @@ export interface SearchOptions {
 }
 
 // Sanitizes free text into an FTS5 MATCH expression that is safe by
-// construction (D102): tokens are whitespace-split, stripped of double quotes,
+// construction (D104): tokens are whitespace-split, stripped of double quotes,
 // control characters, and the operator characters * ^ ( ), then quoted as
 // phrases, so user input can never be interpreted as FTS syntax. Hyphens,
 // apostrophes, and colons are kept: inside a quoted phrase they are plain
@@ -113,7 +113,7 @@ export function searchIndex(db: Db, opts: SearchOptions): SearchHit[] {
   // bm25 weights follow the column order (kind, ref_id, project_id, meta,
   // title, body): title outranks body. snippet column -1 auto-selects the
   // matched column; the markers are injected via char() so no string literal
-  // is involved (D104).
+  // is involved (D106).
   const rows = db.all<RawRow>(sql`
     SELECT kind,
            ref_id AS refId,

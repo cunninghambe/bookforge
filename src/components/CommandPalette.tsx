@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-// Amendment A10: the command palette. Mounted once in the root layout as a
+// Amendment A11: the command palette. Mounted once in the root layout as a
 // client island; owns the Ctrl/Cmd+K shortcut and also opens on the
 // bookforge:open-palette window event dispatched by the TopNav search button
-// (D105). Renders nothing on /login, where the search API would 401 anyway.
+// (D107). Renders nothing on /login, where the search API would 401 anyway.
 
 interface ApiHit {
   kind: "chapter" | "canon" | "character" | "state";
@@ -59,7 +59,7 @@ interface Group {
   items: Item[];
 }
 
-// Snippet markers per D104: matched ranges arrive wrapped in U+0001/U+0002.
+// Snippet markers per D106: matched ranges arrive wrapped in U+0001/U+0002.
 // Splitting on either marker leaves the matched text at odd indices, which
 // render as <mark> elements. No raw HTML is ever injected.
 function renderSnippet(snippet: string) {

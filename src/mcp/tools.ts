@@ -620,7 +620,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "search",
     description:
-      "Full-text search across chapters (title, pov, synopsis, summary, beats, latest draft prose), canon facts, characters, and character states (A10). Matched ranges in snippets are wrapped in **. Chapter numbers are 1-based. Retired canon is excluded unless includeRetired is true; a projectId scope keeps series-wide facts and characters visible. No LLM call.",
+      "Full-text search across chapters (title, pov, synopsis, summary, beats, latest draft prose), canon facts, characters, and character states (A11). Matched ranges in snippets are wrapped in **. Chapter numbers are 1-based. Retired canon is excluded unless includeRetired is true; a projectId scope keeps series-wide facts and characters visible. No LLM call.",
     inputSchema: {
       query: z.string().min(1),
       kinds: z.array(z.enum(SEARCH_KINDS)).optional(),

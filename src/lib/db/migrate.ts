@@ -146,11 +146,11 @@ export function migrate(sqlite: Database.Database): void {
     definition: "TEXT",
   });
 
-  // Amendment A10: the full-text search index. The virtual table and its
+  // Amendment A11: the full-text search index. The virtual table and its
   // triggers are (re)created every migrate (DROP TRIGGER IF EXISTS keeps the
   // trigger bodies current across upgrades), then the whole index is rebuilt:
   // O(project size), trivially cheap for a single user, and it both indexes
-  // pre-A10 databases on first run and self-heals any drift. See D101.
+  // pre-A11 databases on first run and self-heals any drift. See D103.
   sqlite.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
       kind UNINDEXED,
@@ -166,11 +166,11 @@ export function migrate(sqlite: Database.Database): void {
   rebuildSearchIndex(sqlite);
 }
 
-// ---- Amendment A10: search index maintenance -------------------------------
+// ---- Amendment A11: search index maintenance -------------------------------
 
 // INSERT ... SELECT statements shared by the triggers and the full rebuild.
 // meta carries RAW database values (0-based order fields); the 1-based
-// conversion happens only in src/lib/search.ts via chapterNumbering (A2, D103).
+// conversion happens only in src/lib/search.ts via chapterNumbering (A2, D105).
 
 // A chapter's searchable body: pov, synopsis, summary, beats (the JSON text;
 // the tokenizer discards the punctuation), and the LATEST draft's prose.
@@ -228,7 +228,7 @@ function refreshChapter(idExpr: string): string {
 }
 
 // Triggers keep the index live at the database level, so no code path can
-// write around it (D101). Recreated every migrate so definitions never go
+// write around it (D103). Recreated every migrate so definitions never go
 // stale. Draft changes refresh the owning chapter's row (the body embeds the
 // latest draft); a character update also refreshes that character's state
 // rows, whose titles carry the name.
@@ -319,7 +319,7 @@ function searchTriggerSql(): string {
 }
 
 // Wipes and repopulates the whole index from the source tables. Exported for
-// tests; called from migrate() on every startup (D101).
+// tests; called from migrate() on every startup (D103).
 export function rebuildSearchIndex(sqlite: Database.Database): void {
   sqlite.exec(`
     DELETE FROM search_index;

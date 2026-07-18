@@ -1071,13 +1071,47 @@ assertion itself is byte-for-byte unchanged. Chosen over re-running until green
 
 ### CLI session reuse for chat caching (from A5.1)
 
-SPEC A5.1 defers: per-conversation reuse of the `claude` binary's resume capability so
+Update 2026-07-14: built as Amendment A10. See D98 and D99.
+
+SPEC A5.1 deferred: per-conversation reuse of the `claude` binary's resume capability so
 chat turns on the claude-code transport hit the provider cache. The live drive measured
 cache writes every turn but zero reads across one-shot spawns (each turn is a fresh
-`claude` process, so the provider cache from the prior turn is never read). Revisit if
-chat becomes heavy. Not built: it would require the claude-code transport to hold and
-resume a session id per conversation, which the current per-call spawn model does not
-do, and it is out of A5.1 scope.
+`claude` process, so the provider cache from the prior turn is never read).
+
+## Amendment A10: chat session reuse on the claude-code transport
+
+### D98: Route asks hasSession; the transport owns all session state
+
+The conversation-to-session mapping lives entirely inside ClaudeCodeClient (an
+exported, bounded SessionStore: 64 entries, oldest-first eviction). The chat route
+only asks the optional `LlmClient.hasSession(key)` before assembling the prompt:
+true means it sends a minimal resume remainder (the new author message alone),
+false means the full transcript remainder exactly as before. The fixture and
+api-key clients do not implement hasSession, so every fixture-driven test and the
+api-key transport behave byte-identically to pre-A10. The alternative (the route
+holding session ids) was rejected: it would leak a transport detail into a route
+and into client state.
+
+Recovery is lossless by construction: the chat client still sends the full
+transcript every turn, so an evaporated CLI session (restart, cleanup, eviction)
+just means the next turn re-seeds a fresh session from the transcript. A resumed
+call that fails with the CLI's "No conversation found with session ID" text drops
+the entry and retries fresh once (complete() always; stream() only when nothing
+has been yielded yet, so the restart is invisible). The worst case is one turn
+answered without prior-transcript context.
+
+### D99: Resumed calls never re-pass the system prompt
+
+Verified against the installed CLI (2.1.209) before coding, per the A7 rule: a
+resumed session retains the original `--system-prompt`, returns the same
+session_id, and reports nonzero cache_read_input_tokens; resuming a missing
+session fails fast on stderr (json mode) and in the result event's `errors` array
+(stream-json mode). buildCliArgs therefore omits `--system-prompt` and
+`--no-session-persistence` when resuming, and parseCliResult folds the `errors`
+array into the thrown detail so both failure shapes are detectable from the error
+message. The MCP character_chat tool stays stateless (callers pass the transcript
+each call): a session per MCP caller would need a conversation identity the tool
+contract does not have.
 
 ## Amendment A9: design pass with dark mode
 
@@ -1176,7 +1210,7 @@ the pre-auth login page (a served `/icon.svg` route would 302 to `/login`).
 
 ## Uh-oh crash reporting wiring
 
-### D98: Vendored client, no-op without a DSN, UH_OH_DSN / NEXT_PUBLIC_UH_OH_DSN
+### D100: Vendored client, no-op without a DSN, UH_OH_DSN / NEXT_PUBLIC_UH_OH_DSN
 
 Crash reporting rides `@uh-oh/js` (the author's own self-hosted tool at
 github.com/cunninghambe/uh-oh), vendored verbatim as one dependency-free file at
@@ -1193,7 +1227,7 @@ for this app, and turns on the moment a DSN is set with no further code changes.
 no build-id/git-sha convention, so the build segment is a fixed placeholder per the
 wiring convention shared across the author's repos.
 
-### D99: NEXT_PUBLIC_UH_OH_DSN is a Docker/Fly build arg, not a runtime secret
+### D101: NEXT_PUBLIC_UH_OH_DSN is a Docker/Fly build arg, not a runtime secret
 
 This is the first `NEXT_PUBLIC_` env var in the repo. Next.js inlines
 `NEXT_PUBLIC_` vars into the client bundle at build time, not at request time, so
@@ -1205,7 +1239,7 @@ and DEPLOY.md as `docker build --build-arg ...` / `flyctl deploy --build-arg ...
 Server-side `UH_OH_DSN` has no such issue: it is read at request time, so it is a
 normal runtime secret like `ANTHROPIC_API_KEY`.
 
-### D100: MCP server flushes on SIGINT/SIGTERM before exit
+### D102: MCP server flushes on SIGINT/SIGTERM before exit
 
 `src/mcp/server.ts` installs `SIGINT`/`SIGTERM` handlers that `await flush(2000)`
 then `process.exit(0)`, so a queued-but-unsent event is not silently dropped when
@@ -1219,9 +1253,9 @@ The startup-failure path (`main().catch`) also calls `captureException` and
 `captureException` before returning the existing MCP tool-error response; the
 response shape and message are unchanged.
 
-## Amendment A10: universal search and command palette
+## Amendment A11: universal search and command palette
 
-### D101: One denormalized FTS5 table, trigger-maintained, rebuilt at migrate
+### D103: One denormalized FTS5 table, trigger-maintained, rebuilt at migrate
 
 The index is a single FTS5 virtual table `search_index` (unindexed `kind`,
 `ref_id`, `project_id`, `meta`; indexed `title`, `body`; tokenizer
@@ -1239,7 +1273,7 @@ and self-heals any drift. Porter stemming was considered and rejected: prefix
 queries operate on stemmed terms and can silently miss, and predictable verbatim
 recall matters more here than recall breadth.
 
-### D102: The sanitizer makes FTS syntax unreachable, and the last token is a prefix
+### D104: The sanitizer makes FTS syntax unreachable, and the last token is a prefix
 
 `toFtsQuery` tokenizes on whitespace, strips double quotes, control characters,
 and the operator characters `*` `^` `(` `)`, wraps each surviving token in
@@ -1254,7 +1288,7 @@ construction, which is asserted by unit tests that feed operator soup and
 expect results or emptiness, never a throw. Queries that sanitize to nothing
 return `[]` without touching the database.
 
-### D103: meta stores raw DB values; 1-based conversion stays in chapterNumbering
+### D105: meta stores raw DB values; 1-based conversion stays in chapterNumbering
 
 The `meta` column carries raw database fields (`orderIndex`, `chapterOrder`,
 statuses, types) as JSON written by the triggers. The A2 rule says the 0-based
@@ -1263,7 +1297,7 @@ to 1-based conversion happens in exactly one place, so the query layer
 SQL never adds 1. All three surfaces (palette, `/api/search`, MCP `search`)
 speak 1-based chapter numbers because they all go through that layer.
 
-### D104: Snippet markers are control characters; each surface renders its own
+### D106: Snippet markers are control characters; each surface renders its own
 
 `snippet()` wraps matched ranges in U+0001/U+0002 (inserted via `char(1)` /
 `char(2)` so no SQL string literals are involved). Control characters cannot be
@@ -1272,7 +1306,7 @@ them and emits `<mark>` React elements (no `dangerouslySetInnerHTML` anywhere);
 the MCP tool replaces them with `**`. The API returns the raw markers so future
 consumers choose their own rendering.
 
-### D105: Palette wiring: window event from TopNav, hidden on /login, highlight deep-links
+### D107: Palette wiring: window event from TopNav, hidden on /login, highlight deep-links
 
 The palette mounts once in the root layout (a client island) and owns the
 Ctrl/Cmd+K listener; the TopNav search button is a tiny client component that
