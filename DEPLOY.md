@@ -229,7 +229,7 @@ git fetch origin
 git reset --hard origin/master
 npm install
 npx next build
-node scripts/uh-oh-upload-sourcemaps.mjs --dir .next --release 0.1.0+0
+node scripts/uh-oh-upload-sourcemaps.mjs --dir .next --release 0.1.0+0 --delete-browser-maps
 npm run migrate
 pm2 restart bookforge
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3009/login   # expect 200
@@ -252,6 +252,13 @@ without uh-oh configured never breaks. The `--release` value must match
 `UH_OH_RELEASE` in `src/lib/uh-oh-release.ts` (the package.json version plus
 a fixed `+0` build segment, so `0.1.0+0` today); a mismatched release uploads
 fine but symbolicates nothing, so bump the flag value whenever the package
-version bumps. If the box should not serve browser source maps publicly, add
-`--delete-browser-maps` so the script removes the uploaded `static/**/*.js.map`
-files after a fully successful upload.
+version bumps.
+
+`--delete-browser-maps` is required on this deploy, not optional: everything
+under `/_next/static/` bypasses the auth middleware (the login page's own
+assets must load pre-auth), so any `.js.map` left in `.next/static` is
+world-readable, exposing the client-side source. The flag removes the
+uploaded `static/**/*.js.map` files after ALL uploads succeed (never on
+partial failure), and symbolication is unaffected because the uh-oh server
+keeps its own copies. The `.js` chunks retain `sourceMappingURL` comments
+pointing at now-404 URLs, which is harmless.
