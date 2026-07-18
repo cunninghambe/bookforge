@@ -602,3 +602,40 @@ Purpose: the A9 system is calm but visually reserved; the author wants the UI en
 - Contrast floors: body text and chrome stay comfortably readable in both themes; the focus ring stays blue in both themes so keyboard focus is never confusable with the terracotta selection accent.
 
 Acceptance check: npm run ui-shots captures both themes across login, home, canon, characters, chat, sequencer, draft, review, settings, and threads; primary buttons render terracotta with legible labels in both themes; the braid's payoff nodes and hover selection read in accent; no component file changes beyond TopNav and the layout favicon; the full unit and e2e suites pass unchanged, including the a9-tokens repo check.
+
+### A14 (2026-07-18): Listen and voice notes
+
+Purpose: hands-free review. The author wants the book read aloud while doing other tasks, and wants to speak notes back, without meaningful marginal cost. Both halves already run on the deployment host as local services for another project: a Piper neural TTS HTTP server (POST /speak with a JSON text field returning a WAV; GET /health) and a whisper.cpp server (POST /inference, multipart audio file in, JSON text out). Verified working end to end before this spec was written: Piper synthesized a test sentence and Whisper transcribed it back. This amendment bridges the app to those services. Everything stays on-box (loopback), so the marginal cost is zero.
+
+Configuration: two env vars, TTS_SERVICE_URL and STT_SERVICE_URL (documented in .env.example; on the deployed box they point at the loopback Piper and Whisper ports). When either is unset, its features render nothing and every new route 404s: local dev without the services sees no change at all. The automated test loop NEVER calls the real services: a fixture mode serves a tiny prerecorded WAV for TTS and a canned transcript for STT.
+
+Listen (TTS):
+- Unit of synthesis is the paragraph of a chapter's LATEST draft, split by the same paragraph boundaries the reader sees. Audio is cached content-addressed: key = sha256 of the paragraph text (plus voice id), stored under data/audio. Revising a chapter re-synthesizes only changed paragraphs; re-listening is free. A simple size-capped prune (oldest first, default cap 2 GB) keeps the cache bounded.
+- When ffmpeg is present on the host, WAV output is transcoded to a compressed format (opus or mp3) before caching, since raw WAV over mobile data is heavy; without ffmpeg, WAV is served as is. Detection happens at startup, logged once, never an error.
+- Routes: GET /api/chapters/[id]/audio-manifest (paragraph count, per-paragraph cache state, format) and GET /api/chapters/[id]/audio/[paragraphIndex] (synthesizes on miss, then serves from cache). Both sit behind the session gate like everything else.
+- Player: a quiet Listen control on the draft and review surfaces plus a dedicated /listen/[chapterId] page designed phone-first (A15). Sequential paragraph playback with position display ("paragraph 12 of 48"), previous and next paragraph, play and pause, and speed (client-side playbackRate: free). The player prefetches the next paragraph while the current one plays so on-miss synthesis latency hides. Position persists per chapter in localStorage so leaving and returning resumes.
+
+Voice notes (STT):
+- A hold-to-record button on the listen page and the review surface (MediaRecorder in the browser, opus or webm). Releasing posts the audio with the chapter id and the paragraph index that was playing (or selected) to POST /api/voice-notes; the server forwards the audio to the STT service and receives the transcript.
+- The transcript becomes an INLINE COMMENT on the latest draft through the existing comments machinery: quoted_text anchors to the opening sentence of the target paragraph (the existing quoted-text-is-truth semantics; offsets best effort as ever). The transcript is shown immediately with an inline edit affordance and an undo, because transcription is imperfect; saving is one tap. Nothing about comments' role in revision changes: a voice note IS a comment, and the revision flow consumes it exactly like a typed one.
+- No LLM call anywhere in this amendment; STT and TTS are the local services.
+
+Testing: unit tests for the paragraph splitter (stable boundaries, edge cases), cache keying and prune, the manifest shape, transcript-to-comment anchoring, and the fixture services; e2e drives the listen player against fixture audio (play, skip, position persistence) and creates a voice note end to end with the fixture transcript, asserting the resulting comment appears anchored in review. With the env vars unset, e2e asserts the surfaces are absent. All existing tests pass unchanged.
+
+Acceptance check: on the deployed box, a locked chapter plays through paragraph by paragraph with skip and speed working and survives a page reload at position; revising one paragraph re-synthesizes only that paragraph (cache hit behavior unit-asserted, observed manually on the box); holding record, speaking a note, and releasing lands a correctly anchored comment visible on the review page within seconds; a fresh clone with neither env var set shows no trace of any of this.
+
+### A15 (2026-07-18): Mobile-friendly layout
+
+Purpose: the v1 non-goal "no mobile-optimized layout" is superseded by author directive: listening and voice notes (A14) happen away from the desk, and the deployed app is already reachable over HTTPS from a phone. This amendment makes the whole app usable on a phone, not just the listen page, while changing nothing about the desktop experience or the A9/A13 design system.
+
+Scope and rules:
+- Responsive, not redesigned: the same pages, components, tokens, and testids, with layout that adapts below a single breakpoint (640px, Tailwind sm). No separate mobile routes (except /listen/[chapterId], which is phone-first per A14), no user-agent sniffing, no new hues, no component library.
+- TopNav collapses: below the breakpoint the wordmark, Search, and theme toggle stay; the section links fold into a single disclosure menu with 44px touch targets. The command palette becomes a full-screen sheet below the breakpoint (same component, same testids, same behavior).
+- Reading and writing surfaces: prose, editors, and forms go full-width with comfortable padding; the draft textarea and review prose keep a readable measure; buttons and rows hit 44px touch targets; the keyboard-driven approval checklists remain keyboard-first on desktop and gain plain tap targets for approve and reject on mobile (same handlers, no gate change).
+- The braid: already inside an overflow-x-auto container; on mobile it stays horizontally swipeable with the thread list stacking above it. No pinch-zoom requirements.
+- Viewport metadata is set explicitly in the root layout.
+- Hard rule unchanged: every A9/A13 token discipline applies; no raw palette classes; never an em-dash.
+
+Testing: a Playwright mobile project (iPhone-class viewport, 390x844) runs a core-flow subset: login, home, canon list and add, open a chapter, palette open then search then navigate, threads page renders with a swipeable braid, listen page controls. Key pages assert no horizontal body scroll (scrollWidth within viewport width; the braid scrolls inside its own container). The full desktop suite runs unchanged and must stay green.
+
+Acceptance check: on a real phone against the deployed app: log in, find a chapter via the palette, read it, play it, speak a note, and see the comment in review, all without pinch-zooming or horizontal body scrolling; on desktop, screenshots before and after this amendment are visually identical except where a window is actually narrow.
