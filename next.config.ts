@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
   // Pin the workspace root: a stray parent lockfile in the home directory would
   // otherwise be inferred as the root and break file tracing.
   outputFileTracingRoot: here,
+  // Emit browser source maps in production builds so uh-oh can symbolicate
+  // client stack traces (scripts/uh-oh-upload-sourcemaps.mjs uploads them at
+  // deploy time; see DEPLOY.md).
+  productionBrowserSourceMaps: true,
 };
 
 export default nextConfig;

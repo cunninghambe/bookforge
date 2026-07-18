@@ -217,3 +217,41 @@ Backups land under `/data/backups/`, inside the same mounted volume, so they
 survive restarts too. Fly does not download them automatically; use
 `flyctl sftp get` (or `flyctl ssh sftp shell`) to pull a backup file off the
 volume if you want a copy outside Fly.
+
+## Bare-server deploy (pm2)
+
+The reference production deploy is a bare Linux box running `next start` under
+pm2 behind a reverse proxy. From the app checkout on the box, each deploy is:
+
+```
+node scripts/backup.mjs
+git fetch origin
+git reset --hard origin/master
+npm install
+npx next build
+node scripts/uh-oh-upload-sourcemaps.mjs --dir .next --release 0.1.0+0
+npm run migrate
+pm2 restart bookforge
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3009/login   # expect 200
+```
+
+The source map upload step feeds uh-oh symbolication. `next.config.ts` sets
+`productionBrowserSourceMaps: true`, so `next build` emits browser `.map`
+files under `.next/static` alongside the server maps under `.next/server`,
+and the script uploads both. It reads `UH_OH_SERVER_URL`,
+`UH_OH_SYMBOL_TOKEN`, and `UH_OH_PROJECT` from the environment (see the
+script header). It does not load `.env.local` itself; on the box those vars
+live in `.env.local`, so export them first, e.g.:
+
+```
+set -a; . ./.env.local; set +a
+```
+
+When the vars are unset the script prints one line and exits 0, so a deploy
+without uh-oh configured never breaks. The `--release` value must match
+`UH_OH_RELEASE` in `src/lib/uh-oh-release.ts` (the package.json version plus
+a fixed `+0` build segment, so `0.1.0+0` today); a mismatched release uploads
+fine but symbolicates nothing, so bump the flag value whenever the package
+version bumps. If the box should not serve browser source maps publicly, add
+`--delete-browser-maps` so the script removes the uploaded `static/**/*.js.map`
+files after a fully successful upload.
