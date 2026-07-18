@@ -1632,3 +1632,63 @@ initially claimed the A10 number (and the uh-oh wiring and the chat work both
 claimed D98/D99). Resolved at merge time: chat session reuse keeps A10 and
 D98/D99 (it landed on master first), the uh-oh wiring decisions became D100
 through D102, and universal search became A11 with D103 through D107.
+
+---
+
+## Amendment A12: Story threads, dropped-thread detection, and the braid view
+
+Status: COMPLETE. 366 unit tests and 47 e2e tests pass; tsc clean. Built in two
+subagent phases (Opus: backend; Sonnet: braid UI and e2e) from the committed
+SPEC section, reviewed and assembled by the orchestrator.
+
+### What was built
+
+- Data. threads and thread_touches tables (idempotent DDL, drizzle mirrors),
+  repo layer, and threads as a fifth search kind (triggers plus rebuild).
+  Threads can be book-scoped or series-wide; a payoff touch never auto-resolves
+  (resolution is a human action).
+- Proposals. The A1 lock-time extraction call (and the importer, which reuses
+  it) now proposes thread touches and new threads alongside facts and states:
+  attach vs new by case-insensitive name match against the open threads the
+  prompt advertises, rendered in the same keyboard approval checklist, persisted
+  atomically on approve, no trace on reject. Fixtures gained a threads section
+  with every prior assertion intact.
+- Detection. src/lib/threadFlags.ts: STALE_GAP = 4, measured against the book's
+  highest LOCKED chapter; stale and orphan flags are pure functions with no LLM
+  involvement anywhere in the amendment.
+- The braid. /book/[projectId]/threads renders an SVG braid from a pure,
+  unit-tested buildBraidLayout: chapter columns with clickable 1-based labels,
+  bezier thread lines, kind-shaped nodes (advance/mention/complicate/payoff),
+  dashed warn segments where a gap exceeds STALE_GAP, faint run-outs for open
+  threads, terminal ticks for resolved, reduced opacity for retired, and
+  banded-plus-connected co-touch columns. The thread list mirrors braid row
+  order; hover or focus highlights the line in accent; flags read "gone quiet
+  for N chapters" and "introduced and never developed" with Resolve, Retire,
+  manual touches, and a new-thread form alongside.
+- Assembly. The stable prompt prefix gains a conditional OPEN THREADS block
+  (12 most recent, "+N more", instruction sentences per SPEC), visible in the
+  dev inspector and MCP assembled_prompt.
+- Surfaces. Six MCP tools (threads_list, thread_get, thread_create,
+  thread_touch_add, thread_resolve, thread_retire; the gate absence assertions
+  stay honest with a narrow, named exception for the two status tools); palette
+  and /api/search return thread hits deep-linking to the braid with
+  scroll-and-flash.
+
+### Tests
+
+- Unit 338 to 366; e2e 39 to 47; tsc clean. New suites: threads backend,
+  extraction thread proposals, assembler block, braid-layout geometry (stale
+  boundary at exactly STALE_GAP, run-out and terminal casing, co-touch
+  columns, the SPEC acceptance walkthrough), and the a12 e2e spec (UI thread
+  creation, keyboard-only approval of an attach and a new-thread proposal,
+  stale flag with dashed segment, resolve with terminal tick, palette
+  deep-link).
+
+### Judgment calls
+
+See D108 through D120 in DECISIONS.md (D108 to D114 backend, D115 to D120
+braid). Assembly note: this amendment was built while a concurrent session on
+another machine shared the same working tree over Google Drive; the tree
+reverted mid-build twice and a foreign commit landed on the a12-threads
+branch. The orchestrator moved final assembly to a clean off-Drive clone,
+verified the combined tree, and recorded the hazard in the working notes.
