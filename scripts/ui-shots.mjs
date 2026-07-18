@@ -83,6 +83,35 @@ async function seed(request) {
         "her mother had said, once, before the fire.",
     },
   });
+
+  // A13: a second chapter and two threads with touches, so the braid page has
+  // lines, nodes, and a co-touch column to review in both themes.
+  await request.post(`${BASE}/api/chapters`, {
+    data: {
+      projectId: 1,
+      title: "The Long Stair",
+      pov: "Mara",
+      synopsis: "Mara climbs while the light keeps asking.",
+      beats: ["She climbs", "The light asks a question"],
+    },
+  });
+  const threadARes = await request.post(`${BASE}/api/threads`, {
+    data: { projectId: 1, name: "Mara and the tower's debt", type: "mystery" },
+  });
+  const threadA = (await threadARes.json()).thread.id;
+  const threadBRes = await request.post(`${BASE}/api/threads`, {
+    data: { projectId: 1, name: "The half-burned letter", type: "promise" },
+  });
+  const threadB = (await threadBRes.json()).thread.id;
+  await request.post(`${BASE}/api/threads/${threadA}/touches`, {
+    data: { chapter: 1, kind: "advance", evidence: "patient as a creditor" },
+  });
+  await request.post(`${BASE}/api/threads/${threadA}/touches`, {
+    data: { chapter: 2, kind: "complicate", evidence: "the light asks a question" },
+  });
+  await request.post(`${BASE}/api/threads/${threadB}/touches`, {
+    data: { chapter: 1, kind: "mention", evidence: "a letter she will not read" },
+  });
   return { characterId, chapterId };
 }
 
@@ -121,6 +150,7 @@ const pages = [
   ["characters", "/characters"],
   ["chat", `/characters/${characterId}/chat`, pinChat],
   ["sequencer", "/book/1"],
+  ["threads", "/book/1/threads"],
   ["draft", `/book/1/chapter/${chapterId}/draft`],
   ["review", `/book/1/chapter/${chapterId}/review`],
   ["settings", "/settings"],

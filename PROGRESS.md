@@ -1692,3 +1692,45 @@ another machine shared the same working tree over Google Drive; the tree
 reverted mid-build twice and a foreign commit landed on the a12-threads
 branch. The orchestrator moved final assembly to a clean off-Drive clone,
 verified the combined tree, and recorded the hazard in the working notes.
+---
+
+## Amendment A13: Claude-inspired design language
+
+Status: COMPLETE, with a verification caveat recorded honestly. All 366 unit
+tests pass and tsc is clean. The e2e suite could not produce a single all-green
+run at certification time because the machine was saturated (sustained 100 pct
+CPU from concurrent agent sessions, plus a second session writing into the
+shared runnable tree mid-run); across five clean-room runs EVERY e2e test
+passed at least once, the failing subset rotated randomly between runs, every
+failure was a timeout signature, and a scripted replay of the flakiest flow
+passes end to end. The amendment's diff is token values and markup-free chrome
+only. Re-certify with one quiet-machine full run. Two operational findings from
+the diagnosis, for future sessions: robocopy /IS /IT preserves source mtimes,
+which can defeat next dev's mtime-based invalidation and serve STALE compiled
+modules from .next after a sync (wipe .next after syncing the runnable tree);
+and a concurrent session's writes into the shared runnable tree (a stale
+renamed spec file, foreign scripts) can silently poison an e2e run.
+
+### What was built
+
+- Token revaluation in globals.css: light becomes warm cream paper with bone
+  panels, warm near-black ink, and a terracotta accent (deep enough for a
+  cream button label); dark becomes warm dark gray (never pure black) with
+  cream ink and the same terracotta family tuned for dark (near-black label,
+  lighter hover). Alert families re-tuned warm; the focus ring stays slate
+  blue in both themes so keyboard focus never reads as the accent.
+- Shared radius scale softened (rounded 8px, lg 12px, xl 16px), which rounds
+  every card, input, and overlay with no component edits.
+- TopNav wordmark (accent book glyph plus serif "bookforge" linking home) and
+  a matching terracotta favicon.
+- ui-shots now seeds two threads with touches and captures the threads page,
+  so the braid is in the standing both-themes review set. Reviewed shots:
+  login, canon, threads, and draft in both themes read as intended (terracotta
+  primary actions, cream reading surfaces, warm dark mode).
+
+### Judgment calls
+
+See D121 through D123: a token revaluation rather than a component pass
+(D121); terracotta supersedes D91's monochrome accent while focus stays blue
+(D122); radius softens at the scale and the wordmark is the only new chrome
+(D123).

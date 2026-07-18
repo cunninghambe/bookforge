@@ -4,9 +4,10 @@ import { CommandPalette } from "@/components/CommandPalette";
 import "./globals.css";
 
 // A9: a minimal book-glyph favicon inlined as a data URI, so it renders with no
-// extra network request (and no middleware gate on a pre-auth page).
+// extra network request (and no middleware gate on a pre-auth page). A13
+// recolors it to the terracotta accent to match the TopNav wordmark.
 const BOOK_FAVICON =
-  "data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20x%3D'7'%20y%3D'5'%20width%3D'18'%20height%3D'22'%20rx%3D'2'%20fill%3D'%231c1b19'%2F%3E%3Crect%20x%3D'7'%20y%3D'5'%20width%3D'3.5'%20height%3D'22'%20fill%3D'%238a857b'%2F%3E%3Cpath%20d%3D'M13%2011h9M13%2015h9M13%2019h6'%20stroke%3D'%23faf9f6'%20stroke-width%3D'1.4'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E";
+  "data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2032%2032'%3E%3Crect%20x%3D'7'%20y%3D'5'%20width%3D'18'%20height%3D'22'%20rx%3D'4'%20fill%3D'%23C15F3C'%2F%3E%3Crect%20x%3D'7'%20y%3D'5'%20width%3D'4'%20height%3D'22'%20rx%3D'2'%20fill%3D'%23A64E2E'%2F%3E%3Cpath%20d%3D'M14%2012h9M14%2016h9M14%2020h6'%20stroke%3D'%23FAF9F5'%20stroke-width%3D'1.6'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E";
 
 export const metadata: Metadata = {
   title: "bookforge",

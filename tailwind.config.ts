@@ -71,6 +71,14 @@ const config: Config = {
         // Bare `border` (no color class) falls back to the soft edge token.
         DEFAULT: "rgb(var(--edge-soft))",
       },
+      borderRadius: {
+        // A13: softer shared radii so cards, inputs, and overlays feel
+        // current without touching component markup. Arbitrary values like
+        // rounded-[2px] and rounded-full are unaffected.
+        DEFAULT: "0.5rem",
+        lg: "0.75rem",
+        xl: "1rem",
+      },
     },
   },
   plugins: [],

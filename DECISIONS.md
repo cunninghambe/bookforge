@@ -1520,6 +1520,37 @@ keeps the common case a single field fewer; a series-wide thread can still be
 created directly against the API (as the MCP tool and any future series view
 would) without adding UI surface this amendment does not call for.
 
+## Amendment A13: Claude-inspired design language
+
+### D121: The re-skin is a token revaluation, not a component pass
+
+Every color change lands in `globals.css` token VALUES (same variable names,
+light and dark), plus one shared Tailwind radius scale, the favicon, and the
+TopNav wordmark. Zero component markup, class vocabulary, or data-testid
+changes, so the entire A9 through A12 test suite passes untouched, including
+the a9-tokens repo check. This is the payoff of A9's token architecture and
+the reason a whole-app restyle is a small amendment.
+
+### D122: Terracotta supersedes D91's monochrome accent; the focus ring stays blue
+
+The light accent is a deeper terracotta (193 95 60) so the cream label reads
+at button sizes; the dark accent is the brighter 217 119 87 with a near-black
+label, which contrasts more strongly on the warm dark surface. D91 (accent as
+a monochrome light/dark inversion) is superseded by the SPEC A13 directive.
+The focus ring deliberately keeps its slate blue in both themes: keyboard
+focus must never be confusable with the terracotta selection and hover
+highlights the braid and the palette use.
+
+### D123: Radius softens at the scale; the wordmark is the only new chrome
+
+`borderRadius` DEFAULT goes to 0.5rem (lg 0.75rem, xl 1rem) in the Tailwind
+theme, so every `rounded` card, input, and overlay softens at once; arbitrary
+values like the palette's `rounded-[2px]` marks and `rounded-full` dots are
+unaffected. The TopNav wordmark (accent book glyph plus serif "bookforge"
+linking home) and the recolored favicon are the only new visual elements.
+`ui-shots` seeds two threads with touches and captures the threads page, so
+the A12 braid is part of the standing visual review set in both themes.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc
