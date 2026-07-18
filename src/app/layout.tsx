@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { CommandPalette } from "@/components/CommandPalette";
 import "./globals.css";
@@ -15,6 +15,16 @@ export const metadata: Metadata = {
   icons: { icon: BOOK_FAVICON },
 };
 
+// A15: explicit viewport metadata so mobile browsers render at device width
+// instead of the ~980px desktop-layout default, which is what forces pinch-zoom
+// on a phone. maximumScale is intentionally left unset: the SPEC's acceptance
+// check is "without pinch-zooming", not "unable to", so zoom stays available for
+// accessibility.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 // A9 theme mechanics: the theme is stored in a long-lived plain cookie
 // (bookforge_theme). The root layout reads it server-side and stamps the dark
 // class on <html> at render, so there is never a flash of the wrong theme. The
@@ -29,7 +39,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className={isDark ? "dark" : undefined}>
       <body className="font-sans antialiased">
-        <div className="mx-auto max-w-5xl px-6">{children}</div>
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">{children}</div>
         {/* A11: the command palette overlay (Ctrl/Cmd+K), one instance app-wide. */}
         <CommandPalette />
       </body>

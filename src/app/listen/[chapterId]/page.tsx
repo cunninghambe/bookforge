@@ -38,7 +38,7 @@ export default async function ListenPage({
   return (
     <main>
       <TopNav active="books" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl" data-testid="listen-heading">
           Listen: {heading}
         </h1>

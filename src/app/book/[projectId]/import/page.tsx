@@ -31,7 +31,7 @@ export default async function ImportPage({
   return (
     <main>
       <TopNav active="books" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl">Import: {project.title}</h1>
         <Link
           href={`/book/${project.id}`}

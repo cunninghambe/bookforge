@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { MobileApproveReject } from "./MobileApproveReject";
 
 const CANON_TYPES = [
   "world_rule",
@@ -506,6 +507,12 @@ export function BibleImportPanel({
                     {f.content}
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={f.approved}
+                  onApprove={() => setFactApproved(i, true)}
+                  onReject={() => setFactApproved(i, false)}
+                  testidPrefix={`bible-fact-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>
@@ -572,6 +579,12 @@ export function BibleImportPanel({
                       </span>
                     </span>
                   </label>
+                  <MobileApproveReject
+                    approved={c.approved}
+                    onApprove={() => setCharApproved(i, true)}
+                    onReject={() => setCharApproved(i, false)}
+                    testidPrefix={`bible-character-proposal-${i}`}
+                  />
                 </li>
               );
             })}
@@ -709,6 +722,12 @@ export function BibleImportPanel({
                           </span>
                         </span>
                       </label>
+                      <MobileApproveReject
+                        approved={s.approved}
+                        onApprove={() => setStateApproved(i, true)}
+                        onReject={() => setStateApproved(i, false)}
+                        testidPrefix={`bible-state-proposal-${i}`}
+                      />
                     </li>
                   );
                 })}

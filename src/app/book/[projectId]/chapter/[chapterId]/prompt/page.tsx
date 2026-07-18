@@ -44,7 +44,7 @@ export default async function PromptInspectorPage({
   return (
     <main>
       <TopNav active="books" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl">
           Assembled prompt: {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>

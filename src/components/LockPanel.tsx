@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { MobileApproveReject } from "./MobileApproveReject";
 
 const CANON_TYPES = [
   "world_rule",
@@ -316,6 +317,26 @@ export function LockPanel({
 
   const locked = status === "locked";
 
+  // A15: named setters, one per proposal list, each doing exactly what the
+  // matching onKeyDown handler below already did inline. Both the keyboard
+  // shortcut (a/r on a focused row) and the mobile tap targets call these same
+  // functions, so there is exactly one code path for approving or rejecting a
+  // proposal, not two that could drift.
+  function setFactApproved(i: number, v: boolean) {
+    setFacts((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: v } : x)) : p));
+  }
+  function setStateApproved(i: number, v: boolean) {
+    setStates((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: v } : x)) : p));
+  }
+  function setThreadAttachApproved(i: number, v: boolean) {
+    setThreadAttaches((p) =>
+      p ? p.map((x, j) => (j === i ? { ...x, approved: v } : x)) : p,
+    );
+  }
+  function setThreadNewApproved(i: number, v: boolean) {
+    setThreadNews((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: v } : x)) : p));
+  }
+
   return (
     <div
       className="mt-6 rounded border border-edge-soft bg-inset p-3"
@@ -437,14 +458,8 @@ export function LockPanel({
                 data-testid={`fact-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === "a")
-                    setFacts((p) =>
-                      p ? p.map((x, j) => (j === i ? { ...x, approved: true } : x)) : p,
-                    );
-                  if (e.key === "r")
-                    setFacts((p) =>
-                      p ? p.map((x, j) => (j === i ? { ...x, approved: false } : x)) : p,
-                    );
+                  if (e.key === "a") setFactApproved(i, true);
+                  if (e.key === "r") setFactApproved(i, false);
                 }}
                 className="rounded border border-edge-soft bg-surface p-2 text-sm"
               >
@@ -453,15 +468,7 @@ export function LockPanel({
                     type="checkbox"
                     data-testid={`fact-approve-${i}`}
                     checked={f.approved}
-                    onChange={(e) =>
-                      setFacts((p) =>
-                        p
-                          ? p.map((x, j) =>
-                              j === i ? { ...x, approved: e.target.checked } : x,
-                            )
-                          : p,
-                      )
-                    }
+                    onChange={(e) => setFactApproved(i, e.target.checked)}
                     className="mt-1"
                   />
                   <span className="flex-1">
@@ -476,6 +483,12 @@ export function LockPanel({
                     )}
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={f.approved}
+                  onApprove={() => setFactApproved(i, true)}
+                  onReject={() => setFactApproved(i, false)}
+                  testidPrefix={`fact-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>
@@ -495,14 +508,8 @@ export function LockPanel({
                 data-testid={`state-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === "a")
-                    setStates((p) =>
-                      p ? p.map((x, j) => (j === i ? { ...x, approved: true } : x)) : p,
-                    );
-                  if (e.key === "r")
-                    setStates((p) =>
-                      p ? p.map((x, j) => (j === i ? { ...x, approved: false } : x)) : p,
-                    );
+                  if (e.key === "a") setStateApproved(i, true);
+                  if (e.key === "r") setStateApproved(i, false);
                 }}
                 className="rounded border border-edge-soft bg-surface p-2 text-sm"
               >
@@ -511,15 +518,7 @@ export function LockPanel({
                     type="checkbox"
                     data-testid={`state-approve-${i}`}
                     checked={s.approved}
-                    onChange={(e) =>
-                      setStates((p) =>
-                        p
-                          ? p.map((x, j) =>
-                              j === i ? { ...x, approved: e.target.checked } : x,
-                            )
-                          : p,
-                      )
-                    }
+                    onChange={(e) => setStateApproved(i, e.target.checked)}
                     className="mt-1"
                   />
                   <span className="flex-1">
@@ -612,6 +611,12 @@ export function LockPanel({
                     </span>
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={s.approved}
+                  onApprove={() => setStateApproved(i, true)}
+                  onReject={() => setStateApproved(i, false)}
+                  testidPrefix={`state-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>
@@ -631,18 +636,8 @@ export function LockPanel({
                 data-testid={`thread-attach-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === "a")
-                    setThreadAttaches((p) =>
-                      p
-                        ? p.map((x, j) => (j === i ? { ...x, approved: true } : x))
-                        : p,
-                    );
-                  if (e.key === "r")
-                    setThreadAttaches((p) =>
-                      p
-                        ? p.map((x, j) => (j === i ? { ...x, approved: false } : x))
-                        : p,
-                    );
+                  if (e.key === "a") setThreadAttachApproved(i, true);
+                  if (e.key === "r") setThreadAttachApproved(i, false);
                 }}
                 className="rounded border border-edge-soft bg-surface p-2 text-sm"
               >
@@ -651,15 +646,7 @@ export function LockPanel({
                     type="checkbox"
                     data-testid={`thread-attach-approve-${i}`}
                     checked={a.approved}
-                    onChange={(e) =>
-                      setThreadAttaches((p) =>
-                        p
-                          ? p.map((x, j) =>
-                              j === i ? { ...x, approved: e.target.checked } : x,
-                            )
-                          : p,
-                      )
-                    }
+                    onChange={(e) => setThreadAttachApproved(i, e.target.checked)}
                     className="mt-1"
                   />
                   <span className="flex-1">
@@ -674,6 +661,12 @@ export function LockPanel({
                     )}
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={a.approved}
+                  onApprove={() => setThreadAttachApproved(i, true)}
+                  onReject={() => setThreadAttachApproved(i, false)}
+                  testidPrefix={`thread-attach-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>
@@ -693,18 +686,8 @@ export function LockPanel({
                 data-testid={`thread-new-proposal-${i}`}
                 tabIndex={0}
                 onKeyDown={(e) => {
-                  if (e.key === "a")
-                    setThreadNews((p) =>
-                      p
-                        ? p.map((x, j) => (j === i ? { ...x, approved: true } : x))
-                        : p,
-                    );
-                  if (e.key === "r")
-                    setThreadNews((p) =>
-                      p
-                        ? p.map((x, j) => (j === i ? { ...x, approved: false } : x))
-                        : p,
-                    );
+                  if (e.key === "a") setThreadNewApproved(i, true);
+                  if (e.key === "r") setThreadNewApproved(i, false);
                 }}
                 className="rounded border border-edge-soft bg-surface p-2 text-sm"
               >
@@ -713,15 +696,7 @@ export function LockPanel({
                     type="checkbox"
                     data-testid={`thread-new-approve-${i}`}
                     checked={n.approved}
-                    onChange={(e) =>
-                      setThreadNews((p) =>
-                        p
-                          ? p.map((x, j) =>
-                              j === i ? { ...x, approved: e.target.checked } : x,
-                            )
-                          : p,
-                      )
-                    }
+                    onChange={(e) => setThreadNewApproved(i, e.target.checked)}
                     className="mt-1"
                   />
                   <span className="flex-1">
@@ -736,6 +711,12 @@ export function LockPanel({
                     )}
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={n.approved}
+                  onApprove={() => setThreadNewApproved(i, true)}
+                  onReject={() => setThreadNewApproved(i, false)}
+                  testidPrefix={`thread-new-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>

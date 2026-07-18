@@ -19,9 +19,9 @@ export default async function BookPage({
   return (
     <main>
       <TopNav active="books" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl">{project.title}</h1>
-        <div className="flex gap-4 text-sm text-muted">
+        <div className="flex flex-wrap gap-4 text-sm text-muted">
           <Link
             href={`/book/${project.id}/import`}
             data-testid="import-link"

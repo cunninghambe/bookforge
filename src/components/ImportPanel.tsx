@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { uiChapterToOrder } from "@/lib/chapterNumbering";
+import { MobileApproveReject } from "./MobileApproveReject";
 
 const CANON_TYPES = [
   "world_rule",
@@ -247,6 +248,16 @@ export function ImportPanel({
     document.getElementById(`import-row-${clamped}`)?.focus();
   }
 
+  // A15: named setters shared by the keyboard handler (a/r on a focused row)
+  // and the mobile tap targets below, so both paths approve or reject through
+  // the identical state update.
+  function setFactApproved(i: number, v: boolean) {
+    setFacts((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: v } : x)) : p));
+  }
+  function setStateApproved(i: number, v: boolean) {
+    setStates((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: v } : x)) : p));
+  }
+
   function onFactKeyDown(e: React.KeyboardEvent, i: number) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -255,9 +266,9 @@ export function ImportPanel({
       e.preventDefault();
       focusRow(i - 1);
     } else if (e.key === "a") {
-      setFacts((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: true } : x)) : p));
+      setFactApproved(i, true);
     } else if (e.key === "r") {
-      setFacts((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: false } : x)) : p));
+      setFactApproved(i, false);
     }
   }
 
@@ -270,9 +281,9 @@ export function ImportPanel({
       e.preventDefault();
       focusRow(flat - 1);
     } else if (e.key === "a") {
-      setStates((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: true } : x)) : p));
+      setStateApproved(i, true);
     } else if (e.key === "r") {
-      setStates((p) => (p ? p.map((x, j) => (j === i ? { ...x, approved: false } : x)) : p));
+      setStateApproved(i, false);
     }
   }
 
@@ -444,15 +455,7 @@ export function ImportPanel({
                     type="checkbox"
                     data-testid={`import-fact-approve-${i}`}
                     checked={f.approved}
-                    onChange={(e) =>
-                      setFacts((p) =>
-                        p
-                          ? p.map((x, j) =>
-                              j === i ? { ...x, approved: e.target.checked } : x,
-                            )
-                          : p,
-                      )
-                    }
+                    onChange={(e) => setFactApproved(i, e.target.checked)}
                     className="mt-1"
                   />
                   <span className="flex-1">
@@ -467,6 +470,12 @@ export function ImportPanel({
                     )}
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={f.approved}
+                  onApprove={() => setFactApproved(i, true)}
+                  onReject={() => setFactApproved(i, false)}
+                  testidPrefix={`import-fact-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>
@@ -494,15 +503,7 @@ export function ImportPanel({
                     type="checkbox"
                     data-testid={`import-state-approve-${i}`}
                     checked={s.approved}
-                    onChange={(e) =>
-                      setStates((p) =>
-                        p
-                          ? p.map((x, j) =>
-                              j === i ? { ...x, approved: e.target.checked } : x,
-                            )
-                          : p,
-                      )
-                    }
+                    onChange={(e) => setStateApproved(i, e.target.checked)}
                     className="mt-1"
                   />
                   <span className="flex-1">
@@ -589,6 +590,12 @@ export function ImportPanel({
                     </span>
                   </span>
                 </label>
+                <MobileApproveReject
+                  approved={s.approved}
+                  onApprove={() => setStateApproved(i, true)}
+                  onReject={() => setStateApproved(i, false)}
+                  testidPrefix={`import-state-proposal-${i}`}
+                />
               </li>
             ))}
           </ul>

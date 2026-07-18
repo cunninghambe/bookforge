@@ -256,12 +256,12 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 pt-[18vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 pt-0 sm:pt-[18vh]"
       onMouseDown={() => setOpen(false)}
       data-testid="command-palette"
     >
       <div
-        className="w-full max-w-xl rounded-lg border border-edge bg-surface shadow-lg"
+        className="h-full w-full rounded-none border-0 bg-surface shadow-lg sm:h-auto sm:max-w-xl sm:rounded-lg sm:border sm:border-edge"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Search everything"
@@ -274,7 +274,7 @@ export function CommandPalette() {
           placeholder="Search chapters, canon, characters..."
           aria-label="Search everything"
           data-testid="palette-input"
-          className="w-full rounded-t-lg border-b border-edge-soft bg-surface px-4 py-3 text-sm text-ink placeholder:text-faint focus:outline-none"
+          className="w-full rounded-t-none border-b border-edge-soft bg-surface px-4 py-3 text-sm text-ink placeholder:text-faint focus:outline-none sm:rounded-t-lg"
           role="combobox"
           aria-expanded="true"
           aria-controls="palette-results"
@@ -285,7 +285,7 @@ export function CommandPalette() {
         <div
           id="palette-results"
           role="listbox"
-          className="max-h-[50vh] overflow-y-auto p-2"
+          className="max-h-[70vh] overflow-y-auto p-2 sm:max-h-[50vh]"
         >
           {groups.map((group) => (
             <div key={group.label}>

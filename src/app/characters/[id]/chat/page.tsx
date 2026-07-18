@@ -30,7 +30,7 @@ export default async function CharacterChatPage({
   return (
     <main>
       <TopNav active="characters" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl">Chat with {character.name}</h1>
         <Link href="/characters" className="text-sm text-muted hover:underline">
           Back to characters

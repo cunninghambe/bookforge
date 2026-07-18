@@ -151,7 +151,7 @@ export function ThreadsManager({
       <NewThreadForm projectId={projectId} characters={characters} onCreated={load} />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[380px_1fr]">
-        <div>
+        <div className="min-w-0">
           <ul className="divide-y divide-edge-soft" data-testid="threads-list">
             {loading && <li className="py-3 text-sm text-faint">Loading...</li>}
             {!loading && threads.length === 0 && (
@@ -175,7 +175,12 @@ export function ThreadsManager({
             ))}
           </ul>
         </div>
-        <div>
+        {/* A15: min-w-0 lets this grid cell shrink below the braid SVG's
+            intrinsic width so BraidView's own overflow-x-auto container is what
+            scrolls on a narrow screen, not the page body (a well-known CSS grid
+            trap: without it, the track grows to fit the content's min-content
+            size and forces page-level horizontal scroll). */}
+        <div className="min-w-0">
           <BraidView
             layout={layout}
             chapters={chapters}

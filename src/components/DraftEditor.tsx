@@ -160,7 +160,7 @@ export function DraftEditor({
   }
 
   return (
-    <div className="mt-4 grid grid-cols-[1fr_18rem] gap-6">
+    <div className="mt-4 grid grid-cols-1 gap-6 sm:grid-cols-[1fr_18rem]">
       <div>
         {(retried ||
           emDashUnresolved ||

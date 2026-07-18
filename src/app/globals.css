@@ -158,3 +158,22 @@ body {
     @apply text-danger-ink hover:underline disabled:opacity-50;
   }
 }
+
+/* A15: below the single mobile breakpoint (640px, matching Tailwind's sm),
+   give the shared button recipes and the raw accent-CTA pattern (bg-accent,
+   used consistently for every primary action across the app) a 44px floor so
+   tap targets are comfortable on a phone. Scoped to a max-width media query,
+   so it is completely inert at sm and up: desktop rendering is untouched. */
+@media (max-width: 639px) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-quiet,
+  .btn-danger,
+  button.bg-accent,
+  a.bg-accent {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+  }
+}

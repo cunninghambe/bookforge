@@ -3,6 +3,17 @@ import { defineConfig } from "@playwright/test";
 // E2E runs against a dev server started with a throwaway DB and a known password.
 // The webServer block boots the app; env vars are set so tests are deterministic
 // and never touch the real Anthropic API (USE_FIXTURE_LLM=1).
+//
+// A15: two projects share that one server. "desktop" is the pre-A15 suite,
+// unchanged, minus the new mobile spec (testIgnore). "mobile" is an
+// iPhone-class viewport (390x844, deviceScaleFactor 3, touch, a mobile Safari
+// UA) that runs ONLY tests/e2e/a15-mobile.spec.ts (testMatch). The settings are
+// manual (the iPhone 13 numbers) rather than the devices["iPhone 13"] preset,
+// because the preset also sets defaultBrowserType: "webkit" and only Chromium
+// is installed on the test machines; running both projects on one engine also
+// keeps the suite's flake profile uniform. workers stay at 1 globally, so the
+// two projects still execute strictly one test at a time, preserving the
+// existing non-parallel execution model.
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 30_000,
@@ -13,6 +24,24 @@ export default defineConfig({
     baseURL: "http://localhost:3100",
     trace: "retain-on-failure",
   },
+  projects: [
+    {
+      name: "desktop",
+      testIgnore: /a15-mobile\.spec\.ts$/,
+    },
+    {
+      name: "mobile",
+      use: {
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+        userAgent:
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile/15E148 Safari/604.1",
+      },
+      testMatch: /a15-mobile\.spec\.ts$/,
+    },
+  ],
   webServer: {
     command: "npm run dev -- --port 3100",
     url: "http://localhost:3100/login",

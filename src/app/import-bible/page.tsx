@@ -25,7 +25,7 @@ export default function ImportBiblePage() {
   return (
     <main>
       <TopNav active="books" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl">Import series bible</h1>
         <Link href="/" className="text-sm text-muted hover:underline">
           Back to books

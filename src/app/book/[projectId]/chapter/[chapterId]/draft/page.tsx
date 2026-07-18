@@ -27,11 +27,11 @@ export default async function DraftPage({
   return (
     <main>
       <TopNav active="books" />
-      <div className="mt-6 flex items-baseline justify-between">
+      <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
         <h1 className="font-serif text-xl">
           {project.title}: {chapter.title || `Chapter ${orderToUiChapter(chapter.orderIndex)}`}
         </h1>
-        <div className="flex gap-4 text-sm text-muted">
+        <div className="flex flex-wrap gap-4 text-sm text-muted">
           <Link href={`/book/${project.id}`} className="hover:underline">
             Back to book
           </Link>

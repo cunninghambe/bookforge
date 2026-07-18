@@ -1631,12 +1631,116 @@ state). They are shown 1-based ("paragraph 12 of 48") with a local `+1` at the
 display site only. Paragraphs are not chapters, so `chapterNumbering` is
 deliberately not used for them; the display convention is kept consistent by hand.
 
+## Amendment A15: mobile-friendly layout
+
+### D132: One breakpoint, added by pushing the original class behind `sm:`
+
+Every responsive change follows one mechanical pattern: the pre-A15 class
+becomes the `sm:`-prefixed class, and a new mobile-appropriate value takes the
+unprefixed slot (`grid-cols-1 sm:grid-cols-[1fr_18rem]`, `px-4 sm:px-6`,
+`pt-0 sm:pt-[18vh]`). Because Tailwind's responsive utilities always sit after
+the base layer in the generated stylesheet, the `sm:` value wins at 640px
+regardless of source order, so desktop's computed CSS is unchanged bit for
+bit. No component gained a second implementation for mobile; each one gained a
+wider or narrower value at the existing breakpoint boundary.
+
+### D133: TopNav's disclosure is a Fragment child, not a wrapper div, and `nav-settings` exists exactly once
+
+`NavDisclosure` (a small client component, mirroring SearchTrigger's D107
+composition) returns the toggle button and the links panel as siblings, not
+wrapped in an extra div: `<nav>` already owns the flex row and its `gap-6`,
+and a wrapper would have doubled up on that gap's math between the wordmark,
+the links, and the ml-auto group. `<nav>` gained `relative` so the mobile
+panel can anchor with `position:absolute` beneath it; at `sm:` the panel
+reverts to `static` and the row reads identically to the pre-A15 markup. Only
+one `Link` carries `data-testid="nav-settings"`; visibility is entirely
+CSS-driven (`hidden` below the breakpoint unless `open`, forced `sm:flex` at
+and above it), so the id is never duplicated in the DOM and a strict-mode
+`getByTestId` lookup resolves to one element on both layouts.
+
+### D134: The command palette becomes a full-screen sheet through class changes only
+
+No new markup, no new state, no new testids: the backdrop's `pt-[18vh]`
+becomes `pt-0 sm:pt-[18vh]`, the panel's `max-w-xl rounded-lg border` becomes
+full-bleed below the breakpoint (`h-full w-full rounded-none border-0`,
+restored at `sm:`), the input's rounded top corner follows the same flip, and
+the results list's `max-h-[50vh]` grows to `max-h-[70vh]` on mobile so a
+full-screen sheet does not leave dead space beneath a short result list.
+Behavior (open/close, the debounce, keyboard nav, the stale-response guard)
+is untouched.
+
+### D135: Mobile approve/reject tap targets call the same setter the keyboard shortcut calls
+
+LockPanel, ImportPanel, and BibleImportPanel each gained (or, for
+BibleImportPanel, already had) one named setter per proposal list
+(`setFactApproved`, `setStateApproved`, etc). The `onKeyDown` handler for
+`a`/`r` and the new `MobileApproveReject` component
+(`src/components/MobileApproveReject.tsx`, shared by all three panels) both
+call that same setter; the tap buttons render only below the breakpoint
+(`sm:hidden`) and are additive markup, so desktop's checklist DOM, testids,
+and keyboard behavior are byte-identical to pre-A15. The approval gate itself
+(`POST /api/extractions/approve`, `POST /api/bible/approve`) is untouched:
+both entry points still just flip a boolean in local state before an
+explicit Approve click.
+
+### D136: A CSS floor, not per-button edits, for the 44px touch-target rule
+
+Rather than hand-edit padding on every button, a `@media (max-width: 639px)`
+block in globals.css sets `min-height: 44px` (with `inline-flex` centering)
+on the shared `.btn-*` recipes and on the `bg-accent` primary-CTA pattern
+used consistently, and exclusively on real buttons and links (checked by
+grep before adding the selector), across the app. The rule is invisible
+above 640px, so it cannot touch desktop rendering, and it reaches most
+primary and secondary actions app-wide without a file-by-file pass. A
+handful of small raw-styled edit/delete controls in CanonManager and
+CharactersManager use neither pattern and are not covered; noted here as a
+residual gap rather than silently left unaddressed.
+
+### D137: Grid-column and flex-wrap fixes were the load-bearing part of "no horizontal body scroll"
+
+Three concrete bugs, not the disclosure or the palette, were what would
+actually have broken the SPEC's automated acceptance check. DraftEditor and
+ReviewEditor's `grid-cols-[1fr_18rem|20rem]` (an unconditional fixed-width
+aside column, wider on its own than a 390px viewport) became
+`grid-cols-1 sm:grid-cols-[...]`. ThreadsManager's braid column gained
+`min-w-0` (a CSS Grid item without it sizes to its content's min-content
+width, defeating BraidView's own `overflow-x-auto` and forcing the whole
+page to scroll instead of the braid's own container). Sequencer's
+add-chapter form (a `min-w-[20rem]` input with no `flex-wrap`), its chapter
+row, and the ten `page.tsx` header rows (an `h1` beside a row of nav links)
+all gained `flex-wrap`, since none of them had ever needed to wrap before
+A15 introduced a viewport narrow enough to require it.
+
+### D138: Viewport metadata leaves zoom available
+
+`export const viewport` in `src/app/layout.tsx` sets
+`width: "device-width", initialScale: 1` and deliberately omits
+`maximumScale` or `userScalable: false`. The acceptance check is "without
+pinch-zooming", not "unable to"; locking zoom out would be an accessibility
+regression the SPEC never asked for.
+
+### D139: The mobile Playwright project is manual iPhone-13 numbers on Chromium, sharing one server
+
+`playwright.config.ts` gained a `projects` array: `desktop` (the pre-A15
+settings, unchanged, with `testIgnore` excluding `a15-mobile.spec.ts`) and
+`mobile` (390x844, deviceScaleFactor 3, `isMobile`, `hasTouch`, a mobile
+Safari UA, with `testMatch` restricted to `a15-mobile.spec.ts`). The settings
+are written out manually rather than spreading `devices["iPhone 13"]`,
+because the preset also carries `defaultBrowserType: "webkit"` and only
+Chromium is installed on the test machine; a first run failed on exactly
+that. Manual settings keep both projects on one engine (uniform flake
+profile, no new browser download). Both share the existing single `webServer`
+and the root-level `workers: 1`, so the two projects still run strictly
+serially in one worker, preserving the pre-A15 non-flaky execution model
+rather than introducing project-level parallelism.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc
 visualizations or tension graphs; export formats beyond concatenated Markdown;
-mobile layout; real-time collaboration, comment threads, version branching beyond
-linear draft versions.
+real-time collaboration, comment threads, version branching beyond linear draft
+versions. (Mobile layout was on this list through A14; Amendment A15 superseded
+it and built it.)
 
 ## Deferred feature ideas (author-proposed mid-build, not in SPEC v1)
 

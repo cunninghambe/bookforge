@@ -1734,3 +1734,74 @@ See D121 through D123: a token revaluation rather than a component pass
 (D121); terracotta supersedes D91's monochrome accent while focus stays blue
 (D122); radius softens at the scale and the wordmark is the only new chrome
 (D123).
+### A13 re-certification (2026-07-18, later)
+
+The caveat above is closed: after A14 and A15 landed on this tree, the full
+e2e suite ran green twice in a row (48 of 48: 47 desktop tests including all
+A13-era surfaces, plus the A15 mobile flow), once by the A15 implementer and
+once independently by the orchestrator. tsc clean, 408 unit tests green.
+
+---
+
+## Amendment A14: Listen and voice notes
+
+Status: COMPLETE. 408 unit tests and 48 e2e tests green; tsc clean. No LLM
+calls; both services are local to the deployment host, so marginal cost is
+zero.
+
+### What was built
+
+- src/lib/audio/: one paragraph-boundary primitive shared by synthesis and
+  anchoring; content-addressed cache (sha256 of voice id + paragraph text,
+  data/audio/, size-capped prune); TTS and STT bridges with fixture modes
+  that short-circuit before any network call; ffmpeg detection with opus
+  transcode and per-file WAV fallback.
+- Routes: GET /api/chapters/[id]/audio-manifest, GET
+  /api/chapters/[id]/audio/[paragraphIndex] (synthesize on miss, cache,
+  serve), POST /api/voice-notes (audio in, whisper transcript out, anchored
+  comment created). All 404 when their service URL is unset.
+- UI: /listen/[chapterId] phone-first player (sequential playback, prev and
+  next, speed, next-paragraph prefetch, localStorage resume); hold-to-record
+  voice notes with transcript shown, inline edit, save, undo; quiet Listen
+  links on draft and review; a voice-note affordance on review. A voice note
+  IS an ordinary comment: the revision flow consumes it unchanged.
+- Verified against the real services before the spec was written: Piper
+  /speak round-tripped through whisper.cpp /inference successfully.
+
+### Judgment calls
+
+See D124 through D131: URL-presence gating with fixtures orthogonal;
+checked-in tiny WAV fixture with a programmatic fallback; opus when ffmpeg
+is present, WAV otherwise, never an error; voice notes create immediately
+with PATCH-to-edit and undo; review target paragraph from the selection
+offset; unset-config coverage as a route unit test.
+
+---
+
+## Amendment A15: Mobile-friendly layout
+
+Status: COMPLETE. 408 unit tests green; the full e2e suite (47 desktop + 1
+mobile core-flow test) ran 48 of 48 green in a single run, twice. tsc clean.
+
+### What was built
+
+- One breakpoint (640px): TopNav folds its section links into a 44px
+  disclosure (server component preserved; the disclosure is a client child
+  composed like SearchTrigger); the command palette becomes a full-screen
+  sheet below the breakpoint via classes only; editors and review drop to
+  one column; approval checklists gain mobile tap targets that call the
+  SAME handlers as the keyboard shortcuts (gates untouched); the braid
+  scrolls in its own container with no body-level horizontal scroll; page
+  header rows wrap; explicit viewport metadata with zoom left available.
+- Playwright projects: desktop (everything except the mobile spec, exactly
+  the pre-A15 suite) and mobile (390x844 iPhone-class on Chromium, manual
+  device settings because the WebKit preset is not installed), sharing one
+  webServer, strictly serial.
+- Desktop rendering is class-identical at sm: and up.
+
+### Judgment calls
+
+See D132 through D139. Residual gap recorded in D136: a few small quiet
+text-link controls do not get the 44px floor. The real-phone acceptance
+pass (login, palette, read, listen, speak a note over HTTPS) is the
+author's manual step.

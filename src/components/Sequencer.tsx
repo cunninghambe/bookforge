@@ -61,7 +61,7 @@ export function Sequencer({ projectId }: { projectId: number }) {
 
   return (
     <div>
-      <form onSubmit={addChapter} className="flex items-center gap-2 text-sm">
+      <form onSubmit={addChapter} className="flex flex-wrap items-center gap-2 text-sm">
         <input
           aria-label="New chapter title"
           data-testid="add-chapter-input"
@@ -132,7 +132,7 @@ function ChapterRow({
       data-chapter-id={chapter.id}
       data-status={chapter.status}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex flex-col">
           <button
             aria-label="Move up"
