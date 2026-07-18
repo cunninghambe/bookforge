@@ -12,6 +12,14 @@ const CANON_TYPES = [
 ] as const;
 type CanonType = (typeof CANON_TYPES)[number];
 
+// Amendment A12: touch kind and thread type vocabularies for the thread
+// proposal rows below, mirrored locally like the canon types above rather than
+// imported from the repo layer (client components stay decoupled from it).
+const TOUCH_KINDS = ["advance", "complicate", "payoff", "mention"] as const;
+type TouchKind = (typeof TOUCH_KINDS)[number];
+const THREAD_TYPES = ["arc", "mystery", "promise", "relationship"] as const;
+type ThreadType = (typeof THREAD_TYPES)[number];
+
 interface CharacterOpt {
   id: number;
   name: string;
@@ -34,6 +42,24 @@ interface StateRow {
   approved: boolean;
 }
 
+// A12: an attach proposal targets an existing open thread by id; a new-thread
+// proposal creates the thread and its first touch together on approval.
+interface ThreadAttachRow {
+  threadId: number;
+  name: string;
+  kind: TouchKind;
+  evidence: string | null;
+  approved: boolean;
+}
+
+interface ThreadNewRow {
+  name: string;
+  type: ThreadType;
+  kind: TouchKind;
+  evidence: string | null;
+  approved: boolean;
+}
+
 interface ExtractResponse {
   ok: boolean;
   facts?: Array<{
@@ -47,6 +73,18 @@ interface ExtractResponse {
     feels: string | null;
     hiding: string | null;
     evidenceQuote: string | null;
+  }>;
+  threadAttaches?: Array<{
+    threadId: number;
+    name: string;
+    kind: TouchKind;
+    evidence: string | null;
+  }>;
+  threadNews?: Array<{
+    name: string;
+    type: ThreadType;
+    kind: TouchKind;
+    evidence: string | null;
   }>;
   error?: string;
   raw?: string;
@@ -82,10 +120,13 @@ export function LockPanel({
   const [chars, setChars] = useState<CharacterOpt[]>(characters);
   const [facts, setFacts] = useState<FactRow[] | null>(null);
   const [states, setStates] = useState<StateRow[] | null>(null);
+  const [threadAttaches, setThreadAttaches] = useState<ThreadAttachRow[] | null>(null);
+  const [threadNews, setThreadNews] = useState<ThreadNewRow[] | null>(null);
   const [extractionRaw, setExtractionRaw] = useState<string | null>(null);
   const [approved, setApproved] = useState<{
     facts: number;
     states: number;
+    threads: number;
   } | null>(null);
 
   const canLock = unresolvedCount === 0 && !busy;
@@ -107,6 +148,8 @@ export function LockPanel({
       setExtractionRaw(data.raw ?? data.error ?? "Extraction failed to parse.");
       setFacts([]);
       setStates([]);
+      setThreadAttaches([]);
+      setThreadNews([]);
       return;
     }
     setExtractionRaw(null);
@@ -129,6 +172,13 @@ export function LockPanel({
         approved: false,
       })),
     );
+    // A12: thread proposals ride the same checklist. A missing key (an old
+    // fixture, or a backend that predates this amendment) degrades to an empty
+    // list rather than a crash.
+    setThreadAttaches(
+      (data.threadAttaches ?? []).map((a) => ({ ...a, approved: false })),
+    );
+    setThreadNews((data.threadNews ?? []).map((n) => ({ ...n, approved: false })));
   }
 
   async function lock() {
@@ -170,6 +220,8 @@ export function LockPanel({
     setSummary(null);
     setFacts(null);
     setStates(null);
+    setThreadAttaches(null);
+    setThreadNews(null);
     setExtractionRaw(null);
     setApproved(null);
   }
@@ -193,11 +245,18 @@ export function LockPanel({
   }
 
   async function approve() {
-    if (!facts && !states) return;
+    if (!facts && !states && !threadAttaches && !threadNews) return;
     setError(null);
     const approvedFacts = (facts ?? []).filter((f) => f.approved);
     const approvedStates = (states ?? []).filter((s) => s.approved);
-    if (approvedFacts.length === 0 && approvedStates.length === 0) {
+    const approvedAttaches = (threadAttaches ?? []).filter((a) => a.approved);
+    const approvedNewThreads = (threadNews ?? []).filter((n) => n.approved);
+    if (
+      approvedFacts.length === 0 &&
+      approvedStates.length === 0 &&
+      approvedAttaches.length === 0 &&
+      approvedNewThreads.length === 0
+    ) {
       setError("Approve at least one proposal, or there is nothing to add.");
       return;
     }
@@ -224,6 +283,17 @@ export function LockPanel({
           feels: s.feels || null,
           hiding: s.hiding || null,
         })),
+        threadAttaches: approvedAttaches.map((a) => ({
+          threadId: a.threadId,
+          kind: a.kind,
+          evidence: a.evidence,
+        })),
+        newThreads: approvedNewThreads.map((n) => ({
+          name: n.name,
+          type: n.type,
+          kind: n.kind,
+          evidence: n.evidence,
+        })),
       }),
     });
     setBusy(false);
@@ -232,10 +302,16 @@ export function LockPanel({
       setError(data.error ?? "Approval failed.");
       return;
     }
-    setApproved({ facts: approvedFacts.length, states: approvedStates.length });
+    setApproved({
+      facts: approvedFacts.length,
+      states: approvedStates.length,
+      threads: approvedAttaches.length + approvedNewThreads.length,
+    });
     // Mark approved rows so they cannot be double-submitted.
     setFacts((prev) => (prev ? prev.filter((f) => !f.approved) : prev));
     setStates((prev) => (prev ? prev.filter((s) => !s.approved) : prev));
+    setThreadAttaches((prev) => (prev ? prev.filter((a) => !a.approved) : prev));
+    setThreadNews((prev) => (prev ? prev.filter((n) => !n.approved) : prev));
   }
 
   const locked = status === "locked";
@@ -312,10 +388,14 @@ export function LockPanel({
           data-testid="approve-success"
           className="mt-3 rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
         >
-          Approved {approved.facts} fact(s) and {approved.states} state(s). Facts
-          are now locked canon; states apply from the next chapter.{" "}
+          Approved {approved.facts} fact(s), {approved.states} state(s), and{" "}
+          {approved.threads} thread update(s). Facts are now locked canon; states
+          apply from the next chapter; thread touches show on the braid.{" "}
           <Link href="/canon" className="underline">
             View canon
+          </Link>{" "}
+          <Link href={`/book/${projectId}/threads`} className="underline">
+            View threads
           </Link>
           .
         </div>
@@ -335,7 +415,11 @@ export function LockPanel({
         </div>
       )}
 
-      {(facts !== null || states !== null) && extractionRaw === null && (
+      {(facts !== null ||
+        states !== null ||
+        threadAttaches !== null ||
+        threadNews !== null) &&
+        extractionRaw === null && (
         <div className="mt-4" data-testid="extraction-panel">
           <p className="mb-2 text-xs uppercase tracking-wide text-muted">
             Proposals (nothing is added until you approve)
@@ -526,6 +610,130 @@ export function LockPanel({
                         </button>
                       )}
                     </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+
+          <ul className="mt-3 space-y-2" data-testid="thread-attach-proposals">
+            {(threadAttaches ?? []).length === 0 && (
+              <li
+                className="text-xs text-faint"
+                data-testid="no-thread-attach-proposals"
+              >
+                No thread attach proposals.
+              </li>
+            )}
+            {(threadAttaches ?? []).map((a, i) => (
+              <li
+                key={`thread-attach-${i}`}
+                data-testid={`thread-attach-proposal-${i}`}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "a")
+                    setThreadAttaches((p) =>
+                      p
+                        ? p.map((x, j) => (j === i ? { ...x, approved: true } : x))
+                        : p,
+                    );
+                  if (e.key === "r")
+                    setThreadAttaches((p) =>
+                      p
+                        ? p.map((x, j) => (j === i ? { ...x, approved: false } : x))
+                        : p,
+                    );
+                }}
+                className="rounded border border-edge-soft bg-surface p-2 text-sm"
+              >
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    data-testid={`thread-attach-approve-${i}`}
+                    checked={a.approved}
+                    onChange={(e) =>
+                      setThreadAttaches((p) =>
+                        p
+                          ? p.map((x, j) =>
+                              j === i ? { ...x, approved: e.target.checked } : x,
+                            )
+                          : p,
+                      )
+                    }
+                    className="mt-1"
+                  />
+                  <span className="flex-1">
+                    <span className="mr-2 rounded bg-chip px-1.5 py-0.5 text-xs uppercase text-muted">
+                      attach: {a.kind}
+                    </span>
+                    {a.name}
+                    {a.evidence && (
+                      <span className="mt-1 block text-xs italic text-faint">
+                        evidence: &ldquo;{a.evidence}&rdquo;
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+
+          <ul className="mt-3 space-y-2" data-testid="thread-new-proposals">
+            {(threadNews ?? []).length === 0 && (
+              <li
+                className="text-xs text-faint"
+                data-testid="no-thread-new-proposals"
+              >
+                No new-thread proposals.
+              </li>
+            )}
+            {(threadNews ?? []).map((n, i) => (
+              <li
+                key={`thread-new-${i}`}
+                data-testid={`thread-new-proposal-${i}`}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "a")
+                    setThreadNews((p) =>
+                      p
+                        ? p.map((x, j) => (j === i ? { ...x, approved: true } : x))
+                        : p,
+                    );
+                  if (e.key === "r")
+                    setThreadNews((p) =>
+                      p
+                        ? p.map((x, j) => (j === i ? { ...x, approved: false } : x))
+                        : p,
+                    );
+                }}
+                className="rounded border border-edge-soft bg-surface p-2 text-sm"
+              >
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    data-testid={`thread-new-approve-${i}`}
+                    checked={n.approved}
+                    onChange={(e) =>
+                      setThreadNews((p) =>
+                        p
+                          ? p.map((x, j) =>
+                              j === i ? { ...x, approved: e.target.checked } : x,
+                            )
+                          : p,
+                      )
+                    }
+                    className="mt-1"
+                  />
+                  <span className="flex-1">
+                    <span className="mr-2 rounded bg-chip px-1.5 py-0.5 text-xs uppercase text-muted">
+                      new {n.type}: {n.kind}
+                    </span>
+                    {n.name}
+                    {n.evidence && (
+                      <span className="mt-1 block text-xs italic text-faint">
+                        evidence: &ldquo;{n.evidence}&rdquo;
+                      </span>
+                    )}
                   </span>
                 </label>
               </li>

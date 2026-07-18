@@ -36,6 +36,13 @@ export default async function BookPage({
           >
             Consistency sweep
           </Link>
+          <Link
+            href={`/book/${project.id}/threads`}
+            data-testid="threads-link"
+            className="hover:underline"
+          >
+            Threads
+          </Link>
           <a
             href={`/api/projects/${project.id}/export`}
             data-testid="export-button"

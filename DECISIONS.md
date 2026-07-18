@@ -1433,6 +1433,93 @@ revision-hunk-resolve tool: they now except thread_resolve and thread_retire by
 name while still forbidding any other resolve tool, so the human-only boundary is
 kept exactly, just stated more precisely.
 
+## Amendment A12: the braid view (phase 2)
+
+### D115: buildBraidLayout's stale rule is shared with the run-out, not reserved for between-touch gaps
+
+`src/lib/braidLayout.ts` imports `STALE_GAP` from `threadFlags.ts` rather than
+redefining the threshold, so the braid's dashed-segment cutoff and the list's
+stale/orphan chips can never drift apart. A segment's `stale` boolean uses the
+same `toOrder - fromOrder > STALE_GAP` rule whether it is a between-touch
+segment or the trailing run-out from an open thread's last touch to the locked
+frontier. This matters for a thread with exactly one touch: it has no
+between-touch segment at all, so without this unification a badly dropped
+single-touch thread would never render dashed-in-warn, only faint. Making the
+run-out compute `stale` the same way means "orphan and dropped" reads the same
+in the line as "many touches then dropped," which is what the SPEC's line
+"the drop is visible in the line itself" asks for.
+
+### D116: retired threads get neither run-out nor terminal; row order mirrors the braid exactly
+
+The SPEC states the run-out/terminal split as two cases (open gets a run-out,
+resolved gets a terminal tick) and says nothing about retired threads beyond
+"render at reduced opacity." Read literally, retired is a third status that
+gets neither: its line simply stops at its last touch, and BraidView applies
+the opacity reduction as a rendering concern, not a geometry one. Separately,
+ThreadsManager's thread list is reordered to `layout.rows` (looked up back to
+full thread objects by id) rather than kept in API order, so the list and the
+braid are pixel-row-aligned, matching the SPEC's "the braid and list are two
+views of one selection."
+
+### D117: SVG anchors carry focus, click, and tooltip for free; payoff nodes keep a permanent accent ring
+
+Braid nodes and chapter-column labels are plain SVG `<a href>` elements instead
+of `<g tabIndex>` with manual keydown handling: an anchor is natively
+focusable, Enter and click both navigate, and the global `focus-visible`
+outline (D95) already matches on the `a` element name regardless of SVG
+namespace, so no new CSS or JS was needed for "keyboard-focusable... Enter
+opens the chapter." An SVG `<title>` child gives the native tooltip carrying
+kind and evidence. Colors are semantic Tailwind utilities (`fill-ink`,
+`stroke-warn-edge`, `fill-inset/70`, and so on) that resolve through the same
+CSS-variable tokens as the rest of the app (A9's `fill`/`stroke` core plugins
+read from the same `colors` theme as `bg`/`text`), so both themes render
+correctly with no bespoke SVG palette. Payoff nodes keep a permanent thin
+accent-colored ring as part of their kind-shape (matching the SPEC's own list
+of four node shapes) even when not selected; this is not a "per-thread color"
+violation because every thread's payoff nodes look identical, it is a
+kind-level exception the SPEC itself carves out, parallel to filled-circle
+advance, ring mention, and diamond complicate. Co-touch bands use the neutral
+`inset` token rather than `warn`: convergence is not a problem, so it does not
+borrow the alert family.
+
+### D118: the stale-gap chapter count is computed client-side from data already on hand
+
+The API only returns the boolean `flags: {stale, orphan}`, not the numeric gap,
+so the list row's "gone quiet for N chapters" wording computes N itself from
+the thread's already-fetched touches and the book's already-fetched chapters:
+the highest 1-based chapter number among locked chapters minus the highest
+1-based touched chapter number. This stays correct without an extra 0-based
+detour because a gap between two chapter numbers is the same whether both ends
+are expressed 1-based or 0-based; only single chapter-number values need the
+`chapterNumbering` conversion, never a difference of two.
+
+### D119: LockPanel's thread proposals reuse the fact/state approval recipe verbatim
+
+Thread-attach and new-thread proposal rows in `LockPanel.tsx` are copies of the
+existing fact/state row recipe: a `tabIndex={0}` `<li>` with an `onKeyDown` for
+`a`/`r`, a checkbox mirroring the same approved flag, and the one shared
+`Approve checked proposals` button gathering all four categories into a single
+`POST /api/extractions/approve` call. No new keyboard machinery (no arrow-key
+row-to-row navigation) was added; approving a specific row via keyboard is
+`.focus()` on that row's testid followed by a real `a` keypress, matching how
+the fact/state rows already work and were already designed to be driven. Touch
+kind and thread type vocabularies are mirrored locally in the component (like
+`CanonManager`'s local `TYPES` array) rather than imported from the repo layer,
+keeping client components decoupled from server-only modules. A response
+missing `threadAttaches`/`threadNews` (an old fixture, or a backend that lags
+this amendment) degrades to empty lists rather than a crash, so the panel is
+forward-compatible.
+
+### D120: the threads page's new-thread form is book-scoped only; no series-wide toggle
+
+Unlike canon's Add form, the threads page's new-thread form has no scope
+selector: a thread created from `/book/<id>/threads` is always created with
+that book's `projectId`. The SPEC's new-thread form line only asks for "name,
+type, optional character pair for relationship," and a book-scoped default
+keeps the common case a single field fewer; a series-wide thread can still be
+created directly against the API (as the MCP tool and any future series view
+would) without adding UI surface this amendment does not call for.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

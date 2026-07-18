@@ -9,7 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 // (D107). Renders nothing on /login, where the search API would 401 anyway.
 
 interface ApiHit {
-  kind: "chapter" | "canon" | "character" | "state";
+  kind: "chapter" | "canon" | "character" | "state" | "thread";
   id: number;
   projectId: number | null;
   title: string;
@@ -19,6 +19,8 @@ interface ApiHit {
   canonType?: string;
   role?: string | null;
   characterId?: number;
+  // thread hits (A12): the thread type (arc | mystery | promise | relationship).
+  threadType?: string;
   url: string;
 }
 
@@ -35,13 +37,14 @@ const NAV_COMMANDS: NavCommand[] = [
   { label: "Import bible", url: "/import-bible" },
 ];
 
-const KIND_ORDER: ApiHit["kind"][] = ["chapter", "canon", "character", "state"];
+const KIND_ORDER: ApiHit["kind"][] = ["chapter", "canon", "character", "state", "thread"];
 
 const GROUP_LABEL: Record<ApiHit["kind"], string> = {
   chapter: "Chapters",
   canon: "Canon",
   character: "Characters",
   state: "Character states",
+  thread: "Threads",
 };
 
 const CANON_TYPE_LABEL: Record<string, string> = {
@@ -115,6 +118,9 @@ function HitRow({ hit }: { hit: ApiHit }) {
     if (hit.role) meta.push(hit.role);
   } else if (hit.kind === "state") {
     if (hit.chapter) meta.push(`from ch ${hit.chapter}`);
+  } else if (hit.kind === "thread") {
+    if (hit.threadType) meta.push(hit.threadType);
+    if (hit.status) meta.push(hit.status);
   }
   return (
     <div className="min-w-0">
@@ -327,7 +333,7 @@ export function CommandPalette() {
           ))}
           {query.trim().length > 0 && !loading && hits.length === 0 && (
             <div className="px-2 py-4 text-sm text-muted" data-testid="palette-empty">
-              No matches in chapters, canon, characters, or states.
+              No matches in chapters, canon, characters, states, or threads.
             </div>
           )}
         </div>
