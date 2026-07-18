@@ -15,6 +15,19 @@ const nextConfig: NextConfig = {
   // Pin the workspace root: a stray parent lockfile in the home directory would
   // otherwise be inferred as the root and break file tracing.
   outputFileTracingRoot: here,
+  // Crash-reporting source maps (uh-oh). Browser maps land under
+  // .next/static/**/*.js.map, which Next serves publicly at /_next/static; the
+  // Dockerfile's builder stage uploads them to uh-oh then unconditionally
+  // deletes every .js.map under .next/static before the runtime image is
+  // assembled, so a production deploy never serves one regardless of whether
+  // uh-oh is configured at build time (see DECISIONS and DEPLOY.md).
+  productionBrowserSourceMaps: true,
+  experimental: {
+    // Server bundle maps (.next/server/**/*.js.map). Never served publicly
+    // (no route exposes .next/server); uploaded the same way as the browser
+    // maps for symbolicated server stack traces.
+    serverSourceMaps: true,
+  },
 };
 
 export default nextConfig;

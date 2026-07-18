@@ -1284,7 +1284,93 @@ deep-link as `?highlight=<id>`; the server pages pass that param into
 temporary ring. Chapter hits land on the draft page, matching the sequencer's
 canonical link for a chapter.
 
-## Deferred non-goals (from SPEC, not built)
+## Amendment: uh-oh source-map pipeline and client re-vendor
+
+### D106: Client re-vendored to v0.3.0 verbatim; only the regenerate-path comment was corrected
+
+`src/lib/uh-oh-client.ts` was overwritten with the v0.3.0 vendor snapshot
+byte-for-byte, except the header's "Regenerate:" comment line, which the
+snapshot carried as an absolute path into the temp directory it was generated
+in rather than this repo's own path; that one line was restored to
+`--out src/lib/uh-oh-client.ts` (its only job is telling a future maintainer
+how to regenerate the file here, so a foreign path there would be actively
+wrong, not merely stylistic). The public API is unchanged (v0.3.0 adds an
+opt-in Node disk spool behind a new optional `spoolDir` on `InitOptions`,
+never enabled since this app never passes it), so `instrumentation.ts`,
+`instrumentation-client.ts`, and `src/mcp/server.ts` needed no changes; `npx
+tsc --noEmit` confirmed it.
+
+### D107: Both browser and server source maps are generated; both are attainable on the installed Next version
+
+`next.config.ts` sets `productionBrowserSourceMaps: true` (browser bundle maps
+under `.next/static`) and `experimental.serverSourceMaps: true` (server bundle
+maps under `.next/server`). The installed Next (15.5.20) types and honors
+`experimental.serverSourceMaps`, confirmed by a real `npm run build` that
+produced both: 28 browser maps and 72 server maps in one run. No scoping down
+was needed here; both platforms get symbolicated stack traces.
+
+### D108: Public-map safety is an unconditional post-build sweep, not a productionBrowserSourceMaps env gate
+
+Two options were on the table: gate `productionBrowserSourceMaps` on an env
+the deploy sets, or always generate maps and always sweep them before the
+runtime image is assembled. The sweep was chosen. Gating generation would mean
+a plain `docker build` with no uh-oh vars never produces maps at all, so the
+upload step would have nothing to upload even when the three upload vars ARE
+set on a later deploy unless that same gate env is also threaded through and
+kept in sync, two knobs doing one job. The sweep needs only one guarantee, and
+it is simple to state and verify: `npm run clean-sourcemaps`
+(`scripts/clean-sourcemaps.mjs`, new, plain Node) runs in the Dockerfile
+builder stage immediately after `npm run upload-sourcemaps || true`, deletes
+every `*.map` file under `.next/static` and `.next/standalone/.next/server`,
+and is NOT gated on the upload step's exit code, so it runs whether the upload
+ran, no-opped (no env set), fully succeeded, or partially failed. `.next/static`
+is what the runner stage copies verbatim and Next serves publicly at
+`/_next/static`, so this is the actual safety boundary; `.next/standalone/.next/
+server` (the traced copy that ships inside `.next/standalone`, not the
+pre-trace `.next/server` the uploader reads from, which the builder stage
+discards) is swept too for hygiene even though it is never served over HTTP.
+Verified against a real build: before the sweep, 28 static + 69 traced-server
+maps existed; `npm run upload-sourcemaps` with no env vars printed the skip
+line and exited 0 without touching any of them; `npm run clean-sourcemaps`
+then deleted all 97 (plus one `.css.map` Next's CSS pipeline emits
+independently of these two options, see D109) while every `.js`/`.css` file
+was left intact.
+
+### D109: The cleanup sweep matches any `.map` file, not only `.js.map`
+
+The vendored uploader only looks for `*.js.map` (correct for what it uploads),
+but a real build was found to also emit `.next/static/css/*.css.map` from
+Next's built-in CSS pipeline, unconditionally and independent of
+`productionBrowserSourceMaps`. Since the acceptance bar is "no public map in
+any path," `scripts/clean-sourcemaps.mjs` matches any file ending in `.map`,
+not just `.js.map`, so this and any future map type Next adds are covered by
+the same unconditional sweep without needing a matching update.
+
+### D110: The release string is duplicated into a plain-Node wrapper, not imported
+
+`src/lib/uh-oh-release.ts` (`${package.json version}+0`, D98) is TypeScript, so
+a plain-Node script cannot import it, the same constraint `backup.mjs`
+documents for `DATABASE_PATH`. `scripts/upload-sourcemaps.mjs` (new, not
+vendored, kept separate from the byte-identical vendored uploader) duplicates
+the one-line convention, then spawns the vendored
+`scripts/uh-oh-upload-sourcemaps.mjs` with `--dir .next --release <that
+string> --delete-browser-maps`, inheriting stdio and its exit code, so
+`npm run upload-sourcemaps` always uploads under the exact release the app's
+own `init()` calls report crashes under.
+
+### D111: The three sourcemap-upload env vars are Docker/Fly build args, matching the NEXT_PUBLIC_UH_OH_DSN precedent
+
+`UH_OH_SERVER_URL` / `UH_OH_SYMBOL_TOKEN` / `UH_OH_PROJECT` are read only by
+`scripts/upload-sourcemaps.mjs` inside the Dockerfile's `builder` stage (a
+build-time step, never by the running app), so they are wired as `ARG`s
+promoted to `ENV` in that stage, the same pattern D99 established for
+`NEXT_PUBLIC_UH_OH_DSN`, rather than `flyctl secrets` (which are runtime-only
+and would never reach a build step) or BuildKit `--secret` mounts (a bigger
+departure from this repo's one existing precedent, and the repo brief allows
+either). Because they are set only in the discarded `builder` stage and never
+promoted into `runner`, they do not appear in the final image's `docker
+history`; `.env.example` documents all three as deploy-time-only with no
+effect on `npm run dev`.
 
 Image generation; multi-user/accounts beyond the shared password; story-arc
 visualizations or tension graphs; export formats beyond concatenated Markdown;

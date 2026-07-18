@@ -1487,56 +1487,74 @@ gated by middleware on the login page (D97).
 
 ---
 
-## Amendment A10: Universal search and command palette
+## uh-oh: source-map pipeline and client re-vendor
 
-Status: COMPLETE. 277 unit tests and 39 e2e tests pass; tsc clean; no LLM calls
-anywhere in the feature.
+Status: COMPLETE. Infra/observability work (crash-reporting wiring), not a SPEC
+phase or amendment: re-vendors the `@uh-oh/js` client to v0.3.0 and adds a
+production source-map pipeline so uh-oh can symbolicate crash stack traces.
 
 ### What was built
 
-- Index. An FTS5 virtual table `search_index` (unindexed kind/ref_id/project_id/
-  meta, indexed title/body, unicode61 with diacritics removal) over chapters
-  (title, pov, synopsis, summary, beats, LATEST draft prose), canon facts,
-  characters, and character states (titled by the owning character). Kept live
-  by SQL triggers on all five source tables (a character rename refreshes its
-  state rows), and wiped-and-rebuilt in `migrate()` on every startup so pre-A10
-  databases index themselves on upgrade and drift self-heals. `meta` stores raw
-  0-based values; `src/lib/search.ts` converts via chapterNumbering (A2).
-- Query layer. `src/lib/search.ts`: `toFtsQuery` sanitizer (quoted phrases,
-  final-token prefix, FTS syntax unreachable by construction), bm25 ranking with
-  title above body, snippet marker characters U+0001/U+0002 at the boundary,
-  kinds/projectId/includeRetired/limit filters. Series-wide rows stay visible
-  under a projectId scope; retired canon is excluded by default.
-- Web. `GET /api/search` behind the session gate; `CommandPalette` mounted in
-  the root layout (Ctrl/Cmd+K, or the TopNav Search button via a window event),
-  debounced with the stale-response guard, grouped results plus quick-nav
-  commands, full keyboard driving, `<mark>` highlights built from marker
-  segments (no raw HTML). Canon and character hits deep-link as
-  `?highlight=<id>`: the managers reload if needed, scroll to the row, and
-  flash it briefly. Chapter hits open the draft page.
-- MCP. A `search` tool over the same layer (** around matches, 1-based chapter
-  numbers). The A6 human-only gate boundary is untouched; the tool-surface
-  tests now pin the list including `search`.
+- `src/lib/uh-oh-client.ts` re-vendored to v0.3.0 (adds an opt-in Node disk
+  spool, never enabled here; the public API this app calls is unchanged).
+  `instrumentation.ts`, `instrumentation-client.ts`, and `src/mcp/server.ts`
+  needed no changes.
+- `scripts/uh-oh-upload-sourcemaps.mjs`: the vendored, self-contained uploader
+  (zero dependencies). `scripts/upload-sourcemaps.mjs` (new, plain Node, not
+  vendored) resolves this app's release string
+  (`${package.json version}+0`, the same convention `src/lib/uh-oh-release.ts`
+  uses) and invokes it with `--dir .next --release <that string>
+  --delete-browser-maps`, wired as `npm run upload-sourcemaps`. No-ops (exit 0)
+  when `UH_OH_SERVER_URL` / `UH_OH_SYMBOL_TOKEN` / `UH_OH_PROJECT` are unset.
+- `next.config.ts`: `productionBrowserSourceMaps: true` and
+  `experimental.serverSourceMaps: true`, both confirmed attainable on the
+  installed Next (15.5.20) by a real build.
+- `scripts/clean-sourcemaps.mjs` (new): recursively deletes every `*.map` file
+  under `.next/static` and `.next/standalone/.next/server`. Wired as
+  `npm run clean-sourcemaps` and run UNCONDITIONALLY in the Dockerfile builder
+  stage right after the (possibly no-op, possibly failed) upload step, so a
+  production image never serves a source map at `/_next/static` regardless of
+  whether uh-oh was configured. Matches on any `.map` extension, not only
+  `.js.map`, after a real build turned up a `.css.map` Next's CSS pipeline
+  emits independent of the two options above.
+- `Dockerfile`: builder stage gains three optional `ARG`/`ENV` pairs
+  (`UH_OH_SERVER_URL`, `UH_OH_SYMBOL_TOKEN`, `UH_OH_PROJECT`, same pattern as
+  the existing `NEXT_PUBLIC_UH_OH_DSN`), then `RUN npm run upload-sourcemaps
+  || true` followed by the unconditional `RUN npm run clean-sourcemaps`,
+  before the runner stage's `COPY --from=builder /app/.next/static` and
+  `COPY --from=builder /app/.next/standalone`.
+- `.env.example` and `DEPLOY.md` (Docker and Fly.io sections) document the
+  three new vars as deploy-time-only build args, never read at app runtime.
 
-### Tests
+### Verification
 
-- New unit `tests/unit/search.test.ts` (20): sanitizer edge cases and operator
-  soup, trigger sync per table (latest-draft-only asserted both for new
-  versions and the in-place working-draft update), rename refresh, ranking,
-  scoping, limit clamp, marker snippets, rebuild and migrate idempotence.
-- `tests/unit/mcp-tools.test.ts` (+4) and the stdio acceptance test (+1) cover
-  the MCP tool, including retired-by-default and 1-based numbers.
-- New e2e `tests/e2e/a10.spec.ts` (3): prose search to the draft page with a
-  superseded-draft negative check, canon deep-link with row highlight, Esc /
-  TopNav reopen / arrows / Enter quick-nav to /settings.
-- Counts: unit 250 to 277 (+27), e2e 36 to 39 (+3). tsc clean.
+- `npx tsc --noEmit`: clean.
+- `npm run build`: succeeds with both source-map options on; a real run
+  produced 28 browser maps (`.next/static`) and 72 server maps
+  (`.next/server`, 69 traced into `.next/standalone/.next/server`), plus one
+  `.css.map`.
+- `npm run upload-sourcemaps` with no uh-oh env set: prints the skip line,
+  exits 0, touches no files (confirmed via a map count before/after).
+- `npm run clean-sourcemaps`: deleted all 97 `.map` files across both target
+  directories in that same build, leaving every `.js`/`.css` file intact
+  (spot-checked by extension count).
+- `npm test` (vitest) and the existing test suite: unaffected, since no
+  vendored-client API or app behavior changed (see Judgment calls).
 
-### Judgment calls
+### Judgment calls (mirrored in DECISIONS.md, D106-D111)
 
-See D101 through D105 in DECISIONS.md: one denormalized trigger-maintained FTS
-table rebuilt at migrate (D101); the sanitizer strips or quotes everything and
-keeps hyphens/apostrophes/colons so prose-like queries match prose (D102);
-1-based conversion stays in chapterNumbering (D103); snippet markers are
-control characters rendered per surface (D104); the palette is a root-layout
-client island opened by a window event, hidden on /login, with ?highlight
-deep-links that reload the target list when it is stale (D105).
+- D106: the re-vendor is byte-identical except one corrected path in a
+  regenerate comment; API unchanged, so no call site changed.
+- D107: both browser and server source maps are generated; both are
+  attainable on the installed Next version, confirmed by a real build.
+- D108: public-map safety is an unconditional post-build sweep (not gating
+  `productionBrowserSourceMaps` on an env var), covering both the public
+  `.next/static` path and the non-public `.next/standalone/.next/server`
+  path.
+- D109: the sweep matches any `.map` file, not only `.js.map`, after finding
+  a Next-emitted `.css.map` outside the two source-map options' scope.
+- D110: the release string is duplicated into a plain-Node wrapper (cannot
+  import the TypeScript module), mirroring `backup.mjs`'s precedent.
+- D111: the three upload env vars are Docker/Fly build args, matching the
+  `NEXT_PUBLIC_UH_OH_DSN` precedent (D99); never promoted past the discarded
+  builder stage.

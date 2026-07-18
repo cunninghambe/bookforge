@@ -137,6 +137,34 @@ client bundle at build time, so it must be passed to `docker build` instead:
 `docker build --build-arg NEXT_PUBLIC_UH_OH_DSN=... -t bookforge .`. Both are
 no-ops (crash reporting off) when left unset.
 
+Optional: source map upload (uh-oh symbolication). `next.config.ts` turns on
+`productionBrowserSourceMaps` and `experimental.serverSourceMaps`
+unconditionally, so every build produces source maps. The builder stage runs
+`npm run upload-sourcemaps` (wraps the vendored `scripts/uh-oh-upload-
+sourcemaps.mjs` with this app's release string,
+`--dir .next --release <version>+0 --delete-browser-maps`) against three more
+build args, all optional:
+
+```
+docker build \
+  --build-arg UH_OH_SERVER_URL=https://uh-oh.example.com \
+  --build-arg UH_OH_SYMBOL_TOKEN=<symbol token> \
+  --build-arg UH_OH_PROJECT=<project slug> \
+  -t bookforge .
+```
+
+Leave all three unset and the upload step prints one line and exits 0 (a
+no-op), same as every other optional uh-oh var. **Public-map safety, every
+path:** regardless of whether the upload ran, no-opped, succeeded, or
+partially failed, the very next build step (`npm run clean-sourcemaps`,
+unconditional, not gated on the upload's exit code) deletes every `*.map`
+file left under `.next/static` before the runner stage copies that directory.
+Next serves `.next/static` publicly at `/_next/static`, so this is what
+guarantees a production image never serves a source map, with or without
+uh-oh configured. The same sweep also clears the traced server-map copy at
+`.next/standalone/.next/server` (not publicly served, but dead weight once
+uploaded).
+
 `DATABASE_PATH` defaults to `/data/bookforge.db` inside the image, matching the
 mounted volume above.
 
@@ -181,6 +209,23 @@ server side, same as the secrets above. The browser side is a build-time value
 (see the Docker section), so on Fly it goes on the deploy command instead of a
 secret: `flyctl deploy --build-arg NEXT_PUBLIC_UH_OH_DSN=<dsn>`. Both are no-ops
 when left unset.
+
+Optional: source map upload (uh-oh symbolication), same three build-time-only
+vars as the Docker section, passed the same way:
+
+```
+flyctl deploy \
+  --build-arg NEXT_PUBLIC_UH_OH_DSN=<dsn> \
+  --build-arg UH_OH_SERVER_URL=https://uh-oh.example.com \
+  --build-arg UH_OH_SYMBOL_TOKEN=<symbol token> \
+  --build-arg UH_OH_PROJECT=<project slug>
+```
+
+Leave them off any given `flyctl deploy` and that build's maps simply are not
+uploaded; the deploy still succeeds and still ships with zero source maps in
+the image either way (see the Docker section's public-map-safety note: the
+sweep after the upload step is unconditional, not gated on these vars being
+set).
 
 Then, and for every subsequent deploy:
 

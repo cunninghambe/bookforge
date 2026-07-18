@@ -30,6 +30,38 @@ ARG NEXT_PUBLIC_UH_OH_DSN=
 ENV NEXT_PUBLIC_UH_OH_DSN=$NEXT_PUBLIC_UH_OH_DSN
 RUN npm run build
 
+# Optional. next.config.ts turns on productionBrowserSourceMaps and
+# experimental.serverSourceMaps unconditionally, so every build produces
+# source maps under .next/static (browser) and .next/server /
+# .next/standalone/.next/server (server). Uploading them lets uh-oh
+# symbolicate production stack traces; three build args (all optional, same
+# pattern as NEXT_PUBLIC_UH_OH_DSN above) configure it: `docker build
+# --build-arg UH_OH_SERVER_URL=... --build-arg UH_OH_SYMBOL_TOKEN=...
+# --build-arg UH_OH_PROJECT=... .` or the equivalent `flyctl deploy
+# --build-arg` flags. `npm run upload-sourcemaps` (scripts/upload-
+# sourcemaps.mjs) wraps the vendored uploader with --release set to this
+# app's release string and --delete-browser-maps, and itself no-ops (exit 0)
+# when the three vars are unset, so a plain `docker build` with none of them
+# still produces a working image with crash reporting off.
+#
+# PUBLIC-MAP SAFETY: the upload's own --delete-browser-maps only removes what
+# it successfully uploaded, and never deletes on a failed or partial upload.
+# `|| true` on the upload means the cleanup below always runs regardless of
+# whether the upload ran, no-opped, succeeded, or failed, so a browser source
+# map is NEVER present when the runner stage below copies .next/static
+# (Next serves that directory publicly at /_next/static). Same sweep also
+# clears .next/standalone/.next/server, the traced copy of server maps that
+# actually ships inside .next/standalone: not publicly served, but dead
+# weight once uploaded.
+ARG UH_OH_SERVER_URL=
+ARG UH_OH_SYMBOL_TOKEN=
+ARG UH_OH_PROJECT=
+ENV UH_OH_SERVER_URL=$UH_OH_SERVER_URL
+ENV UH_OH_SYMBOL_TOKEN=$UH_OH_SYMBOL_TOKEN
+ENV UH_OH_PROJECT=$UH_OH_PROJECT
+RUN npm run upload-sourcemaps || true
+RUN npm run clean-sourcemaps
+
 # ---- runner: minimal runtime image ----
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
