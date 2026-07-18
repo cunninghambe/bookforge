@@ -115,6 +115,28 @@ export function migrate(sqlite: Database.Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS threads (
+      id INTEGER PRIMARY KEY,
+      project_id INTEGER REFERENCES projects(id),
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('arc','mystery','promise','relationship')),
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved','retired')),
+      character_a_id INTEGER REFERENCES characters(id),
+      character_b_id INTEGER REFERENCES characters(id),
+      note TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_touches (
+      id INTEGER PRIMARY KEY,
+      thread_id INTEGER NOT NULL REFERENCES threads(id),
+      chapter_id INTEGER NOT NULL REFERENCES chapters(id),
+      kind TEXT NOT NULL CHECK (kind IN ('advance','complicate','payoff','mention')),
+      evidence TEXT,
+      source TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   addColumnIfMissing(sqlite, {
@@ -221,10 +243,34 @@ function searchInsertStates(where: string): string {
     FROM character_states s ${where};`;
 }
 
+// Amendment A12: a thread's searchable body is its type, status, note, and every
+// touch's evidence concatenated (so a hit lands whether the term is in the note or
+// in a chapter's quoted evidence). meta carries type, status, and the RAW
+// project_id (NULL for series-wide); the query layer resolves the deep link.
+function searchInsertThreads(where: string): string {
+  return `
+    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    SELECT 'thread', t.id, t.project_id,
+           json_object('type', t.type, 'status', t.status, 'projectId', t.project_id),
+           t.name,
+           t.type || ' ' || t.status || ' ' || COALESCE(t.note, '') || ' ' ||
+           COALESCE((SELECT group_concat(tt.evidence, ' ')
+                     FROM thread_touches tt WHERE tt.thread_id = t.id), '')
+    FROM threads t ${where};`;
+}
+
 function refreshChapter(idExpr: string): string {
   return `
     DELETE FROM search_index WHERE kind = 'chapter' AND ref_id = ${idExpr};
     ${searchInsertChapters(`WHERE c.id = ${idExpr}`)}`;
+}
+
+// A thread row (kind 'thread') refreshed by id: used by triggers on both threads
+// and thread_touches (a touch change alters the parent thread's indexed body).
+function refreshThread(idExpr: string): string {
+  return `
+    DELETE FROM search_index WHERE kind = 'thread' AND ref_id = ${idExpr};
+    ${searchInsertThreads(`WHERE t.id = ${idExpr}`)}`;
 }
 
 // Triggers keep the index live at the database level, so no code path can
@@ -315,6 +361,32 @@ function searchTriggerSql(): string {
       `
       DELETE FROM search_index WHERE kind = 'state' AND ref_id = OLD.id;`,
     ),
+    // A12: threads and their touches. A thread change refreshes its own row; a
+    // touch insert/update/delete refreshes the parent thread's row (the body
+    // embeds every touch's evidence).
+    t("search_threads_ai", "AFTER INSERT ON threads", refreshThread("NEW.id")),
+    t("search_threads_au", "AFTER UPDATE ON threads", refreshThread("NEW.id")),
+    t(
+      "search_threads_ad",
+      "AFTER DELETE ON threads",
+      `
+      DELETE FROM search_index WHERE kind = 'thread' AND ref_id = OLD.id;`,
+    ),
+    t(
+      "search_thread_touches_ai",
+      "AFTER INSERT ON thread_touches",
+      refreshThread("NEW.thread_id"),
+    ),
+    t(
+      "search_thread_touches_au",
+      "AFTER UPDATE ON thread_touches",
+      refreshThread("NEW.thread_id"),
+    ),
+    t(
+      "search_thread_touches_ad",
+      "AFTER DELETE ON thread_touches",
+      refreshThread("OLD.thread_id"),
+    ),
   ].join("\n");
 }
 
@@ -327,6 +399,7 @@ export function rebuildSearchIndex(sqlite: Database.Database): void {
     ${searchInsertCanon("")}
     ${searchInsertCharacters("")}
     ${searchInsertStates("")}
+    ${searchInsertThreads("")}
   `);
 }
 

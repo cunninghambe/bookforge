@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { listProjects } from "@/lib/repo/projects";
 import {
   SEARCH_KINDS,
   searchIndex,
@@ -11,7 +12,9 @@ import {
 // session gate like every other /api route. Each hit gains the app URL the
 // palette navigates to; snippets keep the layer's marker characters (D106).
 
-function urlFor(hit: SearchHit): string {
+// firstBookId is used to deep-link a series-wide thread hit (project_id null): it
+// lands on the first book's threads page (books are ordered by order_index).
+function urlFor(hit: SearchHit, firstBookId: number | null): string {
   switch (hit.kind) {
     case "chapter":
       return `/book/${hit.projectId}/chapter/${hit.id}/draft`;
@@ -21,6 +24,11 @@ function urlFor(hit: SearchHit): string {
       return `/characters?highlight=${hit.id}`;
     case "state":
       return `/characters?highlight=${hit.characterId}`;
+    case "thread": {
+      // A12: series-wide threads (projectId null) resolve to the first book.
+      const projectId = hit.projectId ?? firstBookId;
+      return `/book/${projectId}/threads?highlight=${hit.id}`;
+    }
   }
 }
 
@@ -57,7 +65,9 @@ export async function GET(req: Request) {
     includeRetired: url.searchParams.get("includeRetired") === "1",
     limit,
   });
+  // A12: resolved once so a series-wide thread hit can link to the first book.
+  const firstBookId = listProjects(db)[0]?.id ?? null;
   return NextResponse.json({
-    results: hits.map((h) => ({ ...h, url: urlFor(h) })),
+    results: hits.map((h) => ({ ...h, url: urlFor(h, firstBookId) })),
   });
 }

@@ -5,6 +5,7 @@ import { createCanon } from "@/lib/repo/canon";
 import { createChapter, updateChapter } from "@/lib/repo/chapters";
 import { createDraftVersion } from "@/lib/repo/drafts";
 import { addState, createCharacter } from "@/lib/repo/characters";
+import { addTouch, createThread } from "@/lib/repo/threads";
 
 function scenario() {
   const { db } = testDb();
@@ -170,5 +171,105 @@ describe("assemblePrompt", () => {
       targetBeatIndices: [0],
     });
     expect(a.warnings.some((w) => /over the ~4000 token cap/.test(w))).toBe(true);
+  });
+});
+
+describe("assemblePrompt OPEN THREADS block (A12)", () => {
+  it("omits the block entirely when there are no open threads", () => {
+    const { db, current } = scenario();
+    const a = assemblePrompt(db, { chapterId: current.id, targetBeatIndices: [0] });
+    expect(a.blocks.some((b) => b.name === "OPEN THREADS")).toBe(false);
+    expect(a.prompt).not.toContain("## OPEN THREADS");
+  });
+
+  it("lists open threads with type and last touch in the cacheable stable prefix", () => {
+    const { db, prior, current } = scenario();
+    // prior is a locked chapter at order 0 -> 1-based chapter 1.
+    const theoMara = createThread(db, {
+      projectId: 1,
+      name: "Theo and Mara",
+      type: "relationship",
+    });
+    addTouch(db, {
+      threadId: theoMara.id,
+      chapterId: prior.id,
+      kind: "advance",
+      evidence: "he lingered at her door a moment too long",
+    });
+    // A series-wide open thread never touched shows "not yet touched".
+    createThread(db, {
+      projectId: null,
+      name: "The prophecy",
+      type: "promise",
+    });
+    // A retired thread must not appear.
+    const retired = createThread(db, {
+      projectId: 1,
+      name: "Abandoned subplot",
+      type: "arc",
+      status: "retired",
+    });
+    addTouch(db, { threadId: retired.id, chapterId: prior.id, kind: "mention" });
+
+    const a = assemblePrompt(db, { chapterId: current.id, targetBeatIndices: [0] });
+    const block = a.blocks.find((b) => b.name === "OPEN THREADS");
+    expect(block).toBeTruthy();
+    // Block order: OPEN THREADS sits between CHARACTERS and STORY SO FAR.
+    expect(a.blocks.map((b) => b.name)).toEqual([
+      "CANON",
+      "CHARACTERS",
+      "OPEN THREADS",
+      "STORY SO FAR",
+      "PREVIOUS CHAPTER",
+      "CURRENT CHAPTER",
+      "TASK",
+    ]);
+    expect(block!.content).toContain(
+      "Theo and Mara (relationship): ch 1, advance: he lingered at her door a moment too long",
+    );
+    expect(block!.content).toContain("The prophecy (promise): not yet touched");
+    expect(block!.content).not.toContain("Abandoned subplot");
+    expect(block!.content).toContain("Keep these threads alive");
+    // It caches with CANON etc.: the block is part of the stable prefix.
+    expect(a.stablePrefix).toContain("## OPEN THREADS");
+    expect(a.variableRemainder).not.toContain("## OPEN THREADS");
+  });
+
+  it("caps the list at 12 threads with a +N more line, most recently touched first", () => {
+    const { db, prior, current } = scenario();
+    // 14 open threads, each touched once on the prior chapter.
+    for (let i = 0; i < 14; i += 1) {
+      const t = createThread(db, {
+        projectId: 1,
+        name: `Thread ${String(i).padStart(2, "0")}`,
+        type: "arc",
+      });
+      addTouch(db, { threadId: t.id, chapterId: prior.id, kind: "mention" });
+    }
+    const a = assemblePrompt(db, { chapterId: current.id, targetBeatIndices: [0] });
+    const block = a.blocks.find((b) => b.name === "OPEN THREADS")!;
+    // Exactly 12 thread lines shown (each carries "ch 1, mention").
+    const shown = (block.content.match(/ch 1, mention/g) ?? []).length;
+    expect(shown).toBe(12);
+    expect(block.content).toContain("+2 more");
+  });
+
+  it("caps an overlong evidence snippet", () => {
+    const { db, prior, current } = scenario();
+    const t = createThread(db, { projectId: 1, name: "Longwinded", type: "arc" });
+    addTouch(db, {
+      threadId: t.id,
+      chapterId: prior.id,
+      kind: "advance",
+      evidence: "x".repeat(400),
+    });
+    const a = assemblePrompt(db, { chapterId: current.id, targetBeatIndices: [0] });
+    const block = a.blocks.find((b) => b.name === "OPEN THREADS")!;
+    const line = block.content
+      .split("\n")
+      .find((l) => l.startsWith("Longwinded"))!;
+    expect(line.endsWith("...")).toBe(true);
+    // The snippet is bounded well under the raw 400 characters.
+    expect(line.length).toBeLessThan(200);
   });
 });

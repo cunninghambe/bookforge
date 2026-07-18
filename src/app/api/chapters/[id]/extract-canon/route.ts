@@ -44,5 +44,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     ok: true,
     facts: parsed.facts,
     states: parsed.states,
+    // A12: thread proposals for the same approval checklist. Attaches carry the
+    // existing thread id; news carry a name and type. Nothing lands unapproved.
+    threadAttaches: parsed.threadAttaches,
+    threadNews: parsed.threadNews,
   });
 }

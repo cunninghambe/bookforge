@@ -76,5 +76,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     summary,
     facts: extraction.facts,
     states: extraction.states,
+    // A12: thread proposals travel through the same approval checklist as the
+    // lock flow (the importer reuses runCanonExtraction).
+    threadAttaches: extraction.threadAttaches,
+    threadNews: extraction.threadNews,
   });
 }

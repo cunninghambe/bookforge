@@ -129,6 +129,9 @@ export function extractionPrompt(args: {
   text: string;
   currentCanon: string[];
   knownCharacters: string[];
+  // A12: the book's existing OPEN threads plus series-wide, by name, so the model
+  // attaches a touch to one it recognizes rather than proposing a duplicate.
+  openThreads?: string[];
 }): string {
   const canon = args.currentCanon.length
     ? args.currentCanon.map((c) => `- ${c}`).join("\n")
@@ -136,11 +139,16 @@ export function extractionPrompt(args: {
   const chars = args.knownCharacters.length
     ? args.knownCharacters.map((c) => `- ${c}`).join("\n")
     : "(none tracked yet)";
-  return `You are extracting canon from a locked chapter. Read the final text and the current canon, then propose two things:
+  const threads = args.openThreads && args.openThreads.length
+    ? args.openThreads.map((t) => `- ${t}`).join("\n")
+    : "(none open yet)";
+  return `You are extracting canon from a locked chapter. Read the final text and the current canon, then propose three things:
 
 1. New durable facts the chapter establishes. A durable fact is something future chapters must not contradict: a world rule, a timeline event, a lasting character fact, or an authorial plot decision. Do NOT propose scene details, mood, or phrasing. Do NOT restate facts already in the current canon.
 
 2. Character-state deltas: what a named character now knows, feels, or is hiding that changed in this chapter. Deltas only. Do NOT restate a state the character already had. Only propose states for characters that plausibly match the tracked characters listed below; use the exact tracked name when you can.
+
+3. Thread touches: which standing story threads this chapter advances, complicates, pays off, or mentions. When the chapter touches one of the OPEN THREADS listed below, reuse that thread's exact name and set isNew to false, so the touch attaches to the existing thread instead of duplicating it. Only propose a new thread (isNew true, with a type) for a genuinely new arc, mystery, promise, or relationship the chapter opens. Do NOT invent threads for incidental beats.
 
 CHAPTER
 Title: ${args.chapterTitle}
@@ -155,6 +163,9 @@ ${canon}
 TRACKED CHARACTERS
 ${chars}
 
+OPEN THREADS
+${threads}
+
 Return ONLY a JSON object with this exact shape, and nothing else:
 {
   "facts": [
@@ -162,9 +173,12 @@ Return ONLY a JSON object with this exact shape, and nothing else:
   ],
   "states": [
     { "character": "the character name", "knows": "new knowledge or empty", "feels": "shifted stance or empty", "hiding": "new secret or empty", "evidence_quote": "a short verbatim quote from the text" }
+  ],
+  "threads": [
+    { "thread": "the thread name", "isNew": true, "type": "arc | mystery | promise | relationship", "kind": "advance | complicate | payoff | mention", "evidence": "a short verbatim quote from the text" }
   ]
 }
-Use an empty array for facts or states if there are none. Do not use em-dashes anywhere. No prose outside the JSON.`;
+Use an empty array for facts, states, or threads if there are none. Do not use em-dashes anywhere. No prose outside the JSON.`;
 }
 
 // Consistency sweep for one locked chapter. A4.1 splits the prompt so the locked

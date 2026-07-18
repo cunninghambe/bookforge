@@ -9,6 +9,15 @@ import {
   type CharacterState,
 } from "./characters";
 import { getChapter, updateChapter } from "./chapters";
+import {
+  addTouch,
+  createThread,
+  getThread,
+  type Thread,
+  type ThreadTouch,
+  type ThreadType,
+  type TouchKind,
+} from "./threads";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -29,10 +38,30 @@ export interface ApprovedState {
   hiding?: string | null;
 }
 
+// A12: one approved attach becomes a thread_touch on an EXISTING thread, sourced
+// to the chapter. The thread must still exist at approval time.
+export interface ApprovedThreadAttach {
+  threadId: number;
+  kind: TouchKind;
+  evidence?: string | null;
+}
+
+// A12: one approved new-thread proposal becomes a thread plus its first touch,
+// created atomically inside the same approval transaction.
+export interface ApprovedNewThread {
+  name: string;
+  type: ThreadType;
+  kind: TouchKind;
+  evidence?: string | null;
+}
+
 export interface ApproveInput {
   chapterId: number;
   facts: ApprovedFact[];
   states: ApprovedState[];
+  // A12: optional so every existing caller (facts + states only) is unchanged.
+  threadAttaches?: ApprovedThreadAttach[];
+  newThreads?: ApprovedNewThread[];
 }
 
 export type ApproveResult =
@@ -40,6 +69,8 @@ export type ApproveResult =
       ok: true;
       createdFacts: CanonFact[];
       createdStates: CharacterState[];
+      createdThreads: Thread[];
+      createdTouches: ThreadTouch[];
     }
   | { ok: false; error: string; unmatched: string[] };
 
@@ -81,16 +112,28 @@ export function approveExtraction(db: Db, input: ApproveInput): ApproveResult {
       resolved.push({ characterId: cid, s });
     }
   }
+  // A12: an approved attach must target a thread that still exists. A dangling
+  // threadId rejects the whole call, like an unmatched state, so nothing lands.
+  const attachTargets: ApprovedThreadAttach[] = [];
+  for (const a of input.threadAttaches ?? []) {
+    if (!getThread(db, a.threadId)) {
+      unmatched.push(`thread ${a.threadId}`);
+    } else {
+      attachTargets.push(a);
+    }
+  }
   if (unmatched.length > 0) {
     return {
       ok: false,
-      error: "some state proposals name an unknown character",
+      error: "some proposals reference an unknown character or thread",
       unmatched,
     };
   }
 
   const createdFacts: CanonFact[] = [];
   const createdStates: CharacterState[] = [];
+  const createdThreads: Thread[] = [];
+  const createdTouches: ThreadTouch[] = [];
   db.transaction(() => {
     for (const f of input.facts) {
       createdFacts.push(
@@ -116,9 +159,41 @@ export function approveExtraction(db: Db, input: ApproveInput): ApproveResult {
         }),
       );
     }
+    // A12: approved attaches add a touch on this chapter to the existing thread.
+    for (const a of attachTargets) {
+      createdTouches.push(
+        addTouch(db, {
+          threadId: a.threadId,
+          chapterId: chapter.id,
+          kind: a.kind,
+          evidence: a.evidence ?? null,
+          source,
+        }),
+      );
+    }
+    // A12: approved new-thread proposals create the thread and its first touch
+    // together, atomically, in the same book as the chapter.
+    for (const n of input.newThreads ?? []) {
+      const thread = createThread(db, {
+        projectId: chapter.projectId,
+        name: n.name,
+        type: n.type,
+        status: "open",
+      });
+      createdThreads.push(thread);
+      createdTouches.push(
+        addTouch(db, {
+          threadId: thread.id,
+          chapterId: chapter.id,
+          kind: n.kind,
+          evidence: n.evidence ?? null,
+          source,
+        }),
+      );
+    }
   });
 
-  return { ok: true, createdFacts, createdStates };
+  return { ok: true, createdFacts, createdStates, createdThreads, createdTouches };
 }
 
 // Facts extracted from a given chapter (source 'extraction:<chapterId>').

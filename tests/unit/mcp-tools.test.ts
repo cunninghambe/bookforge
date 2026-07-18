@@ -5,8 +5,9 @@ import * as schema from "@/lib/db/schema";
 import { TOOL_DEFS, TOOL_NAMES, type ToolCtx } from "@/mcp/tools";
 import type { LlmClient, CompleteOptions, CompleteResult } from "@/lib/llm/client";
 import { createCharacter, addState } from "@/lib/repo/characters";
-import { createChapter } from "@/lib/repo/chapters";
+import { createChapter, updateChapter } from "@/lib/repo/chapters";
 import { createDraftVersion } from "@/lib/repo/drafts";
+import { createThread, listTouches } from "@/lib/repo/threads";
 
 // In-process coverage of the MCP tool handlers (A6): the 1-based/0-based boundary
 // conversions, output shaping, and the forbidden-tool absence, without spawning a
@@ -52,7 +53,7 @@ function tool(name: string) {
 }
 
 describe("MCP tool surface", () => {
-  it("registers exactly the SPEC A6 tools plus A11 search", () => {
+  it("registers exactly the SPEC A6 tools plus A11 search and A12 threads", () => {
     expect([...TOOL_NAMES].sort()).toEqual(
       [
         "search",
@@ -74,14 +75,26 @@ describe("MCP tool surface", () => {
         "export_book",
         "interrogate_chapter",
         "sweep_book",
+        "threads_list",
+        "thread_get",
+        "thread_create",
+        "thread_touch_add",
+        "thread_resolve",
+        "thread_retire",
       ].sort(),
     );
   });
 
   it("exposes no human-only gate tool (approve, resolve, lock/unlock chapter, import)", () => {
+    // A12 adds thread_resolve / thread_retire, which are author-equivalent status
+    // changes on standing data (like canon_lock), NOT the revision-hunk gate. They
+    // are the only tools allowed to carry "resolve" / "retire".
+    const threadStatusTools = ["thread_resolve", "thread_retire"];
     for (const n of TOOL_NAMES) {
       expect(/approve/i.test(n)).toBe(false);
-      expect(/resolve/i.test(n)).toBe(false);
+      if (!threadStatusTools.includes(n)) {
+        expect(/resolve/i.test(n)).toBe(false);
+      }
       expect(/revise|revision/i.test(n)).toBe(false);
       expect(/import/i.test(n)).toBe(false);
       expect(/(chapter.*lock|lock.*chapter|unlock)/i.test(n)).toBe(false);
@@ -309,5 +322,104 @@ describe("search tool (A11)", () => {
       query: '"( OR ) AND NEAR( * ^"',
     })) as { hits: Hit[] };
     expect(Array.isArray(out.hits)).toBe(true);
+  });
+});
+
+describe("thread tools (A12)", () => {
+  it("thread_create makes a thread; thread_touch_add stores a 1-based chapter as source 'mcp'", async () => {
+    const { ctx, db } = ctxFor();
+    const ch = createChapter(db, { projectId: 1, title: "Ch" });
+    const created = (await tool("thread_create").handler(ctx, {
+      projectId: 1,
+      name: "Theo and Mara",
+      type: "relationship",
+    })) as { thread: { id: number; status: string; type: string } };
+    expect(created.thread.status).toBe("open");
+    expect(created.thread.type).toBe("relationship");
+
+    const touched = (await tool("thread_touch_add").handler(ctx, {
+      threadId: created.thread.id,
+      chapter: 1,
+      kind: "advance",
+      evidence: "he lingered",
+    })) as { touch: { chapter: number; source: string; chapterId: number } };
+    // Output speaks 1-based; storage is the resolved chapter row.
+    expect(touched.touch.chapter).toBe(1);
+    expect(touched.touch.chapterId).toBe(ch.id);
+    expect(touched.touch.source).toBe("mcp");
+
+    const stored = listTouches(db, created.thread.id);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].source).toBe("mcp");
+    expect(stored[0].chapterOrder).toBe(0);
+  });
+
+  it("thread_get returns the touch timeline with 1-based chapters and computed flags", async () => {
+    const { ctx, db } = ctxFor();
+    // Six locked chapters so the frontier is order 5.
+    const ids: number[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const c = createChapter(db, { projectId: 1, title: `C${i}` });
+      ids.push(c.id);
+      updateChapter(db, c.id, { status: "locked" });
+    }
+    const t = createThread(db, { projectId: 1, name: "The stolen ledger", type: "mystery" });
+    await tool("thread_touch_add").handler(ctx, {
+      threadId: t.id,
+      chapter: 1, // order 0, far behind the frontier
+      kind: "mention",
+    });
+    const out = (await tool("thread_get").handler(ctx, { id: t.id })) as {
+      thread: { flags: { stale: boolean; orphan: boolean } };
+      touches: Array<{ chapter: number }>;
+    };
+    expect(out.touches).toHaveLength(1);
+    expect(out.touches[0].chapter).toBe(1);
+    // One touch, far behind: orphan (and stale).
+    expect(out.thread.flags.orphan).toBe(true);
+    expect(out.thread.flags.stale).toBe(true);
+  });
+
+  it("threads_list includes series-wide threads with per-book flags", async () => {
+    const { ctx, db } = ctxFor();
+    for (let i = 0; i < 6; i += 1) {
+      const c = createChapter(db, { projectId: 1, title: `C${i}` });
+      updateChapter(db, c.id, { status: "locked" });
+    }
+    createThread(db, { projectId: 1, name: "Book thread", type: "arc" });
+    createThread(db, { projectId: null, name: "Series thread", type: "arc" });
+    const out = (await tool("threads_list").handler(ctx, { projectId: 1 })) as {
+      threads: Array<{ name: string; flags: { stale: boolean } }>;
+    };
+    const names = out.threads.map((t) => t.name).sort();
+    expect(names).toEqual(["Book thread", "Series thread"]);
+    // Both are untouched, so neither flags.
+    expect(out.threads.every((t) => !t.flags.stale)).toBe(true);
+  });
+
+  it("thread_resolve and thread_retire change status (author-equivalent, allowed)", async () => {
+    const { ctx, db } = ctxFor();
+    const t = createThread(db, { projectId: 1, name: "Arc", type: "arc" });
+    const resolved = (await tool("thread_resolve").handler(ctx, { id: t.id })) as {
+      thread: { status: string };
+    };
+    expect(resolved.thread.status).toBe("resolved");
+    const retired = (await tool("thread_retire").handler(ctx, { id: t.id })) as {
+      thread: { status: string };
+    };
+    expect(retired.thread.status).toBe("retired");
+  });
+
+  it("thread_touch_add requires a projectId for a series-wide thread", async () => {
+    const { ctx, db } = ctxFor();
+    const t = createThread(db, { projectId: null, name: "Series", type: "arc" });
+    await expect(
+      (async () =>
+        tool("thread_touch_add").handler(ctx, {
+          threadId: t.id,
+          chapter: 1,
+          kind: "advance",
+        }))(),
+    ).rejects.toThrow(/projectId is required/i);
   });
 });

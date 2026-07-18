@@ -10,7 +10,13 @@ type Db = BetterSQLite3Database<typeof schema>;
 // through searchIndex(), so they share sanitization, ranking, filtering, and
 // the A2 1-based chapter conversion.
 
-export const SEARCH_KINDS = ["chapter", "canon", "character", "state"] as const;
+export const SEARCH_KINDS = [
+  "chapter",
+  "canon",
+  "character",
+  "state",
+  "thread",
+] as const;
 export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 // Snippet marker characters at the layer boundary (D106). Control characters
@@ -32,13 +38,16 @@ export interface SearchHit {
   // 1-based chapter number (chapter hits: the chapter itself; state hits: the
   // chapter the state is effective from). Converted via chapterNumbering (A2).
   chapter?: number;
-  // chapter hits: chapter status. canon hits: fact status.
+  // chapter hits: chapter status. canon hits: fact status. thread hits: thread
+  // status (open | resolved | retired).
   status?: string;
   canonType?: string;
   pov?: string | null;
   role?: string | null;
   // state hits: the owning character.
   characterId?: number;
+  // thread hits (A12): the thread type (arc | mystery | promise | relationship).
+  threadType?: string;
 }
 
 export interface SearchOptions {
@@ -169,6 +178,12 @@ function shapeHit(r: RawRow): SearchHit {
         ...base,
         characterId: Number(meta.characterId ?? 0),
         chapter: orderToUiChapter(Number(meta.chapterOrder ?? 0)),
+      };
+    case "thread":
+      return {
+        ...base,
+        threadType: typeof meta.type === "string" ? meta.type : undefined,
+        status: typeof meta.status === "string" ? meta.status : undefined,
       };
   }
 }

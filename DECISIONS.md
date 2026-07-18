@@ -1318,6 +1318,121 @@ deep-link as `?highlight=<id>`; the server pages pass that param into
 temporary ring. Chapter hits land on the draft page, matching the sequencer's
 canonical link for a chapter.
 
+## Amendment A12: story threads and the braid view (phase 1)
+
+Phase 1 is the whole backend: data model, repo, flags, extraction integration,
+assembler block, API routes, search kind, and MCP tools. The braid page, its
+layout function, the CommandPalette threads group, and e2e are Phase 2.
+
+### D108: threads and thread_touches follow the canon patterns, index as a fifth search kind
+
+The two tables mirror the SPEC DDL verbatim as idempotent CREATE TABLE IF NOT
+EXISTS in migrate.ts, with drizzle mirrors in schema.ts, exactly like every
+prior table. project_id NULL means series-wide, reusing the canon_facts
+convention rather than inventing a scope column. A thread joins the A11 FTS index
+as kind 'thread': the title is the thread name; the body concatenates type,
+status, note, and every touch's evidence (group_concat in a subquery), so a hit
+lands whether the term is in the author note or in a chapter's quoted evidence;
+meta carries type, status, and the RAW project_id (D105: no 1-based conversion in
+SQL). Sync is by triggers on BOTH tables: a thread change refreshes its own row,
+and a touch insert/update/delete refreshes the parent thread's row (the body
+embeds touch evidence), plus threads are added to the full rebuildSearchIndex.
+Putting the touch refresh on thread_touches (not only threads) is what keeps the
+index correct when a lock-time approval adds a touch to an existing thread.
+
+### D109: the repo speaks book-plus-series-wide, and touches carry their chapter's order and book
+
+listThreads({ projectId }) returns that book's threads AND series-wide (NULL)
+threads in one call, because every consumer (the prompt's open-thread list, the
+assembler block, the API list, threadFlags) wants exactly that set. A separate
+"series only" mode was not needed in Phase 1 and was left out. listTouches returns
+TouchWithChapter, each touch enriched with its chapter's 0-based order and book id
+via a join, ordered chronologically by chapter order. Carrying chapterOrder and
+chapterProjectId on the touch means the flag and assembly code never re-joins and
+never has to guess which book a touch belongs to. The 0-based order stays internal
+(A2): the 1-based conversion happens only at the route and MCP boundary through
+orderToUiChapter.
+
+### D110: dropped-thread detection is a pure function measured against the locked frontier
+
+computeThreadFlags(status, touchOrders, maxLockedOrder) is pure and unit-tested
+rule by rule. STALE_GAP is an exported const of 4. A thread flags only when it is
+open and the gap from the book's highest LOCKED chapter order to its latest touch
+EXCEEDS STALE_GAP (a gap of exactly 4 does not flag). ORPHAN is the sharper case,
+the same gap with at most one touch ever, so an orphan is also stale and the UI
+shows the "introduced and never developed" wording. Two boundary rulings were made
+and recorded here: a thread with zero touches flags nothing (the rule is defined
+against a latest-touched chapter, which does not exist), and a book with no locked
+chapters (maxLockedOrder null) flags nothing (there is no frontier to measure).
+Resolved and retired threads are exempt. Series-wide threads are evaluated per book
+by threadsWithFlagsForBook, which filters a thread's touches to the book being
+looked at (chapterProjectId) before computing, so the same thread can be stale in
+one book and current in another. The alternative, pooling a series-wide thread's
+touches across books, was rejected: it would hide a thread dropped in book 2 just
+because book 3 touched it.
+
+### D111: lock-time thread proposals ride the existing extraction call, name match beats the model's hint
+
+The A1 extraction JSON contract gains a "threads" array; the prompt now lists the
+book's open threads (its own plus series-wide) by name and instructs the model to
+attach with isNew false rather than duplicate. parseExtractionResponse tolerates a
+missing or non-array "threads" key as an empty list (old replies and the empty
+fixtures stay valid) and drops proposals lacking a name or a valid touch kind.
+normalizeThreadProposals then splits proposals into attach vs new by
+case-insensitive, trimmed name match against the advertised threads, and the match
+is authoritative: the model's isNew hint is ignored, so a mislabeled proposal
+cannot create a duplicate thread. A new-thread proposal that omitted a type
+defaults to 'arc' (recorded here rather than dropping the proposal or inventing a
+richer guess). runCanonExtraction does the normalization (it has the db) and
+returns a CanonExtractionResult carrying threadAttaches and threadNews alongside
+facts and states; the extract-canon route and the importer route (which reuses
+runCanonExtraction) both surface them, so the importer path keeps working with no
+second implementation.
+
+### D112: thread approval extends the one gate, atomically, and stays human-only
+
+approveExtraction gained optional threadAttaches and newThreads, so the single
+approval endpoint and repo function handle facts, states, and threads together and
+every existing facts-plus-states caller is byte-unchanged. Approved attaches insert
+a thread_touch on the chapter; approved new-thread proposals create the thread and
+its first touch, all inside the SAME db.transaction so a new thread never lands
+without its touch. An attach that targets a thread that no longer exists rejects
+the whole call (added to the unmatched list) exactly like an unmatched state, so
+nothing partial lands. Rejection needs no code: only the proposals the author
+explicitly sends are persisted, so an unapproved thread leaves no trace. No MCP
+tool and no code path can approve a thread proposal, preserving the sacred gate;
+the touch source is 'extraction:<chapter_id>', matching the state convention.
+
+### D113: the OPEN THREADS block is a conditional member of the cacheable stable prefix
+
+The assembler now builds explicit stableBlocks and variableBlocks arrays instead of
+slicing at a fixed STABLE_BLOCK_COUNT (removed), because the OPEN THREADS block is
+present only when the book has open threads. It sits between CHARACTERS and STORY
+SO FAR, inside the stable prefix, so it caches with CANON like the rest (A4.1).
+When there are no open threads the block is omitted entirely, so a pre-A12 book
+produces a byte-identical prompt and every existing assembler assertion holds
+unchanged. Each open thread (book plus series-wide) renders as "name (type): ch N,
+kind: evidence snippet" or "not yet touched", ordered by most recently touched,
+capped at 12 with a "+N more" line, evidence snippet bounded near 120 characters.
+The instruction sentences are the SPEC's, rewritten without em-dashes: keep threads
+alive where the beats allow, do not force every thread into every chapter, never
+resolve a thread the beats do not resolve.
+
+### D114: search and MCP round out the surface; thread_resolve and thread_retire are author-equivalent
+
+Thread hits deep-link to /book/<projectId>/threads?highlight=<id>; a series-wide
+thread (project_id null) resolves to the first book by order_index, computed once
+per request in the search route from the projects repo. The MCP surface gains
+threads_list (per-book flags), thread_get (touch timeline, 1-based), thread_create,
+thread_touch_add (1-based chapter in, resolved to a chapter row, source 'mcp'),
+thread_resolve, and thread_retire. Resolve and retire are allowed for the same
+reason canon_lock is: a status change on standing data is an author-equivalent
+action, not an extraction-approval or chapter-lock gate. That forced a narrowing of
+the two tool-surface absence assertions, which used a blanket /resolve/i to catch a
+revision-hunk-resolve tool: they now except thread_resolve and thread_retire by
+name while still forbidding any other resolve tool, so the human-only boundary is
+kept exactly, just stated more precisely.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

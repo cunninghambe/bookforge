@@ -25,6 +25,7 @@ import {
 import {
   listChapters,
   getChapter,
+  chapterAtOrder,
   createChapter,
   updateChapter,
   createQuestions,
@@ -33,6 +34,25 @@ import {
   answerQuestion,
   type Chapter,
 } from "../lib/repo/chapters";
+import {
+  THREAD_TYPES,
+  THREAD_STATUSES,
+  TOUCH_KINDS,
+  createThread,
+  getThread,
+  updateThread,
+  addTouch,
+  listTouches,
+  type Thread,
+  type ThreadType,
+  type TouchKind,
+  type TouchWithChapter,
+} from "../lib/repo/threads";
+import {
+  threadsWithFlagsForBook,
+  flagsForThread,
+  type ThreadFlags,
+} from "../lib/threadFlags";
 import { latestDraft } from "../lib/repo/drafts";
 import { getProject } from "../lib/repo/projects";
 import { logLlmCall } from "../lib/repo/llm";
@@ -125,6 +145,34 @@ function shapeChapter(c: Chapter) {
     pov: c.pov,
     status: c.status,
     synopsis: c.synopsis,
+  };
+}
+
+// A12: a thread card (no touches) with its computed flags when known.
+function shapeThread(t: Thread, flags?: ThreadFlags) {
+  return {
+    id: t.id,
+    projectId: t.projectId,
+    name: t.name,
+    type: t.type,
+    status: t.status,
+    characterAId: t.characterAId,
+    characterBId: t.characterBId,
+    note: t.note,
+    ...(flags ? { flags } : {}),
+  };
+}
+
+// A12: one touch with its 1-based chapter (A2).
+function shapeThreadTouch(t: TouchWithChapter) {
+  return {
+    id: t.id,
+    threadId: t.threadId,
+    chapterId: t.chapterId,
+    chapter: orderToUiChapter(t.chapterOrder),
+    kind: t.kind,
+    evidence: t.evidence,
+    source: t.source,
   };
 }
 
@@ -684,6 +732,156 @@ export const TOOL_DEFS: ToolDef[] = [
         model: modelFor(ctx.db, "sweep"),
       });
       return report;
+    },
+  },
+  {
+    name: "threads_list",
+    description:
+      "List a book's story threads plus series-wide threads, each with its computed stale/orphan flags for that book (A12). Filter by status. Chapter numbers are 1-based. No LLM call.",
+    inputSchema: {
+      projectId: z.number().int(),
+      status: z.enum(THREAD_STATUSES).optional(),
+    },
+    handler: (ctx, args) => {
+      const projectId = args.projectId as number;
+      if (!getProject(ctx.db, projectId)) {
+        throw new Error(`book ${projectId} not found`);
+      }
+      const rows = threadsWithFlagsForBook(ctx.db, projectId, {
+        status: args.status as (typeof THREAD_STATUSES)[number] | undefined,
+      });
+      return {
+        threads: rows.map((r) => shapeThread(r.thread, r.flags)),
+      };
+    },
+  },
+  {
+    name: "thread_get",
+    description:
+      "Get one thread plus its touch timeline (chronological by chapter). Each touch's \"chapter\" is 1-based. Flags are computed against the thread's own book, or the optional projectId for a series-wide thread. No LLM call.",
+    inputSchema: {
+      id: z.number().int(),
+      projectId: z.number().int().optional(),
+    },
+    handler: (ctx, args) => {
+      const id = args.id as number;
+      const thread = getThread(ctx.db, id);
+      if (!thread) throw new Error(`thread ${id} not found`);
+      const flagBook =
+        thread.projectId ?? (args.projectId as number | undefined) ?? null;
+      const flags =
+        flagBook !== null ? flagsForThread(ctx.db, thread, flagBook) : undefined;
+      return {
+        thread: shapeThread(thread, flags),
+        touches: listTouches(ctx.db, id).map(shapeThreadTouch),
+      };
+    },
+  },
+  {
+    name: "thread_create",
+    description:
+      "Create a story thread. type is one of arc, mystery, promise, relationship. Omit projectId or pass null for a series-wide thread, or pass a book's project id. Optional character pair for relationship threads. Returns the created thread.",
+    inputSchema: {
+      name: z.string().min(1),
+      type: z.enum(THREAD_TYPES),
+      projectId: z.number().int().nullable().optional(),
+      note: z.string().optional(),
+      characterAId: z.number().int().nullable().optional(),
+      characterBId: z.number().int().nullable().optional(),
+    },
+    handler: (ctx, args) => {
+      const thread = createThread(ctx.db, {
+        projectId:
+          typeof args.projectId === "number" ? (args.projectId as number) : null,
+        name: (args.name as string).trim(),
+        type: args.type as ThreadType,
+        note: (args.note as string | undefined) ?? null,
+        characterAId:
+          typeof args.characterAId === "number"
+            ? (args.characterAId as number)
+            : null,
+        characterBId:
+          typeof args.characterBId === "number"
+            ? (args.characterBId as number)
+            : null,
+      });
+      return { thread: shapeThread(thread) };
+    },
+  },
+  {
+    name: "thread_touch_add",
+    description:
+      "Add a touch to a thread at a 1-based chapter number (chapter 1 = the book's first chapter). kind is advance, complicate, payoff, or mention. For a series-wide thread pass projectId to say which book's chapter. Source is recorded as \"mcp\".",
+    inputSchema: {
+      threadId: z.number().int(),
+      chapter: z.number().int().min(1),
+      kind: z.enum(TOUCH_KINDS),
+      evidence: z.string().optional(),
+      projectId: z.number().int().optional(),
+    },
+    handler: (ctx, args) => {
+      const threadId = args.threadId as number;
+      const thread = getThread(ctx.db, threadId);
+      if (!thread) throw new Error(`thread ${threadId} not found`);
+      const projectId =
+        thread.projectId ??
+        (typeof args.projectId === "number" ? (args.projectId as number) : null);
+      if (projectId === null) {
+        throw new Error(
+          "projectId is required to add a touch to a series-wide thread",
+        );
+      }
+      // 1-based chapter in, resolved to the chapter row at that 0-based order.
+      const chapter = chapterAtOrder(
+        ctx.db,
+        projectId,
+        uiChapterToOrder(args.chapter as number),
+      );
+      if (!chapter) {
+        throw new Error(
+          `no chapter ${args.chapter} in book ${projectId}`,
+        );
+      }
+      const touch = addTouch(ctx.db, {
+        threadId,
+        chapterId: chapter.id,
+        kind: args.kind as TouchKind,
+        evidence: (args.evidence as string | undefined) ?? null,
+        source: "mcp",
+      });
+      return {
+        touch: {
+          ...shapeThreadTouch({
+            ...touch,
+            chapterOrder: chapter.orderIndex,
+            chapterProjectId: chapter.projectId,
+          }),
+        },
+      };
+    },
+  },
+  {
+    name: "thread_resolve",
+    description:
+      "Mark a thread resolved. Like locking a canon fact, this is an author-equivalent status change on standing data (it does not approve any extraction proposal). Retired and resolved threads leave prompt assembly and flagging.",
+    inputSchema: { id: z.number().int() },
+    handler: (ctx, args) => {
+      const id = args.id as number;
+      if (!getThread(ctx.db, id)) throw new Error(`thread ${id} not found`);
+      const thread = updateThread(ctx.db, id, { status: "resolved" });
+      return { thread: thread ? shapeThread(thread) : null };
+    },
+  },
+  {
+    name: "thread_retire",
+    description:
+      "Retire a thread. Kept but excluded from prompt assembly and flagging, like retired canon. An author-equivalent status change, not an extraction-approval gate.",
+    inputSchema: { id: z.number().int() },
+    handler: (ctx, args) => {
+      const id = args.id as number;
+      if (!getThread(ctx.db, id)) throw new Error(`thread ${id} not found`);
+      const thread = updateThread(ctx.db, id, { status: "retired" });
+      return { thread: thread ? shapeThread(thread) : null };
     },
   },
 ];

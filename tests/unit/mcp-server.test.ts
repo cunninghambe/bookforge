@@ -25,7 +25,8 @@ const DATA_DIR = resolve(ROOT, "data");
 const DB_PATH = resolve(DATA_DIR, `mcp-test-${process.pid}-${Date.now()}.db`);
 const SERVER = resolve(ROOT, "src", "mcp", "server.ts");
 
-// Every tool the SPEC A6 list registers, plus the A11 search tool.
+// Every tool the SPEC A6 list registers, plus the A11 search tool and the A12
+// thread tools.
 const EXPECTED_TOOLS = [
   "search",
   "canon_list",
@@ -46,6 +47,12 @@ const EXPECTED_TOOLS = [
   "character_chat",
   "export_book",
   "sweep_book",
+  "threads_list",
+  "thread_get",
+  "thread_create",
+  "thread_touch_add",
+  "thread_resolve",
+  "thread_retire",
 ];
 
 let client: Client;
@@ -173,7 +180,14 @@ describe("MCP server (A6) over stdio", () => {
     // No tool approves extraction/bible proposals, resolves revision hunks, locks
     // or unlocks a chapter, or imports a chapter.
     expect(names.some((n) => /approve/i.test(n))).toBe(false);
-    expect(names.some((n) => /resolve/i.test(n))).toBe(false);
+    // "resolve" is forbidden EXCEPT thread_resolve / thread_retire (A12), which are
+    // author-equivalent status changes on standing data, not the revision-hunk gate.
+    const threadStatusTools = ["thread_resolve", "thread_retire"];
+    expect(
+      names.some(
+        (n) => /resolve/i.test(n) && !threadStatusTools.includes(n),
+      ),
+    ).toBe(false);
     expect(names.some((n) => /revise|revision/i.test(n))).toBe(false);
     expect(names.some((n) => /import/i.test(n))).toBe(false);
     expect(

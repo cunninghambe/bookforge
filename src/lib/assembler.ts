@@ -10,6 +10,7 @@ import {
 import { listCharacters, effectiveState } from "./repo/characters";
 import { latestDraft } from "./repo/drafts";
 import { getProject, listProjects } from "./repo/projects";
+import { listThreads, listTouches } from "./repo/threads";
 import { draftSystemPrompt } from "./llm/prompts";
 import { orderToUiChapter } from "./chapterNumbering";
 
@@ -22,6 +23,11 @@ const PREV_CHAPTER_CHAR_CAP = 8000 * CHARS_PER_TOKEN; // ~8k tokens
 const DRAFTED_CHAR_CAP = 6000 * CHARS_PER_TOKEN; // ~6k tokens
 const SUMMARY_WORD_CAP = 150;
 const DRAFTED_KEEP_LAST_WORDS = 1000;
+
+// A12: OPEN THREADS block. Show at most the 12 most recently touched open threads;
+// cap each touch's evidence snippet at ~120 characters.
+const OPEN_THREADS_CAP = 12;
+const TOUCH_SNIPPET_CAP = 120;
 
 const DEFAULT_TARGET_WORDS = { min: 800, max: 1500 };
 
@@ -52,9 +58,6 @@ export interface AssembledPrompt {
   warnings: string[];
   appearingCharacters: string[];
 }
-
-// The first four blocks are the stable, cacheable prefix; the last two vary.
-const STABLE_BLOCK_COUNT = 4;
 
 function words(s: string): string[] {
   return s.trim().length === 0 ? [] : s.trim().split(/\s+/);
@@ -121,31 +124,44 @@ export function assemblePrompt(db: Db, input: AssembleInput): AssembledPrompt {
   // 3. CHARACTERS block.
   const charactersBlock = buildCharactersBlock(db, chapter, appearing);
 
-  // 4. STORY SO FAR.
+  // 4. OPEN THREADS (A12): part of the cacheable stable prefix, present only when
+  // the book has open threads.
+  const openThreadsBlock = buildOpenThreads(db, chapter);
+
+  // 5. STORY SO FAR.
   const storyBlock = buildStorySoFar(db, chapter);
 
-  // 5. PREVIOUS CHAPTER.
+  // 6. PREVIOUS CHAPTER.
   const prevBlock = buildPreviousChapter(db, chapter);
 
-  // 6. CURRENT CHAPTER.
+  // 7. CURRENT CHAPTER.
   const currentBlock = buildCurrentChapter(db, chapter, targetSet, input.draftedSoFar);
 
-  // 7. TASK.
+  // 8. TASK.
   const taskBlock = buildTask(chapter, input.targetBeatIndices, targetWords);
 
-  const blocks: AssembledBlock[] = [
+  // CANON, CHARACTERS, (OPEN THREADS), STORY SO FAR, PREVIOUS CHAPTER are the
+  // stable, cacheable prefix; CURRENT CHAPTER and TASK vary per call. The OPEN
+  // THREADS block is inserted only when there are open threads, so a book with
+  // none produces a byte-identical prompt to before A12.
+  const stableBlocks: AssembledBlock[] = [
     { name: "CANON", content: canonBlock },
     { name: "CHARACTERS", content: charactersBlock },
-    { name: "STORY SO FAR", content: storyBlock },
-    { name: "PREVIOUS CHAPTER", content: prevBlock },
+  ];
+  if (openThreadsBlock !== null) {
+    stableBlocks.push({ name: "OPEN THREADS", content: openThreadsBlock });
+  }
+  stableBlocks.push({ name: "STORY SO FAR", content: storyBlock });
+  stableBlocks.push({ name: "PREVIOUS CHAPTER", content: prevBlock });
+
+  const variableBlocks: AssembledBlock[] = [
     { name: "CURRENT CHAPTER", content: currentBlock },
     { name: "TASK", content: taskBlock },
   ];
+  const blocks: AssembledBlock[] = [...stableBlocks, ...variableBlocks];
 
   const render = (bs: AssembledBlock[]) =>
     bs.map((b) => `## ${b.name}\n${b.content}`).join("\n\n");
-  const stableBlocks = blocks.slice(0, STABLE_BLOCK_COUNT);
-  const variableBlocks = blocks.slice(STABLE_BLOCK_COUNT);
   const stableBody = render(stableBlocks);
   const variableRemainder = render(variableBlocks);
   // Prefix carries the "\n\n" that joined the two halves, so prefix + remainder
@@ -243,6 +259,60 @@ function buildCharactersBlock(
     parts.push(lines.join("\n"));
   }
   return parts.join("\n\n");
+}
+
+// A12: the OPEN THREADS block. Every open thread of the book plus series-wide, one
+// line each as "name (type): ch N, kind: evidence snippet" or "not yet touched",
+// ordered by most recently touched, capped at 12 with a "+N more" line. Returns
+// null when there are no open threads (the block is then omitted entirely). Only
+// touches within this book count (a series-wide thread reads against this book).
+function buildOpenThreads(db: Db, chapter: Chapter): string | null {
+  const threads = listThreads(db, {
+    projectId: chapter.projectId,
+    status: "open",
+  });
+  if (threads.length === 0) return null;
+
+  const rows = threads.map((thread) => {
+    const touches = listTouches(db, thread.id).filter(
+      (t) => t.chapterProjectId === chapter.projectId,
+    );
+    // listTouches is ascending by chapter order, so the last element is the most
+    // recent touch.
+    const last = touches.length ? touches[touches.length - 1] : undefined;
+    return { thread, last };
+  });
+
+  // Most recently touched first; untouched threads (order -1) sink to the bottom;
+  // ties break by thread id so the ordering is stable.
+  rows.sort((a, b) => {
+    const ao = a.last ? a.last.chapterOrder : -1;
+    const bo = b.last ? b.last.chapterOrder : -1;
+    if (bo !== ao) return bo - ao;
+    return a.thread.id - b.thread.id;
+  });
+
+  const shown = rows.slice(0, OPEN_THREADS_CAP);
+  const lines = shown.map(({ thread, last }) => {
+    if (!last) return `${thread.name} (${thread.type}): not yet touched`;
+    const ch = orderToUiChapter(last.chapterOrder);
+    const evidence = (last.evidence ?? "").trim();
+    const snippet =
+      evidence.length > TOUCH_SNIPPET_CAP
+        ? evidence.slice(0, TOUCH_SNIPPET_CAP).trimEnd() + "..."
+        : evidence;
+    const tail = snippet ? `: ${snippet}` : "";
+    return `${thread.name} (${thread.type}): ch ${ch}, ${last.kind}${tail}`;
+  });
+
+  const parts: string[] = [lines.join("\n")];
+  const remaining = rows.length - shown.length;
+  if (remaining > 0) parts.push(`+${remaining} more`);
+  parts.push("");
+  parts.push(
+    "Keep these threads alive where the chapter's beats allow. Do not force every thread into every chapter. Never resolve a thread the beats do not resolve.",
+  );
+  return parts.join("\n");
 }
 
 function buildStorySoFar(db: Db, chapter: Chapter): string {

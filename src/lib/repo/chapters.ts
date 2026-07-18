@@ -59,6 +59,27 @@ export function getChapter(db: Db, id: number): Chapter | undefined {
   return row ? decode(row) : undefined;
 }
 
+// The chapter at a given 0-based order within a book, or undefined. Used to
+// resolve a 1-based chapter number to a chapter row when adding a manual thread
+// touch (A12), where the touch references a chapter_id, not an order.
+export function chapterAtOrder(
+  db: Db,
+  projectId: number,
+  orderIndex: number,
+): Chapter | undefined {
+  const row = db
+    .select()
+    .from(schema.chapters)
+    .where(
+      and(
+        eq(schema.chapters.projectId, projectId),
+        eq(schema.chapters.orderIndex, orderIndex),
+      ),
+    )
+    .get();
+  return row ? decode(row) : undefined;
+}
+
 export interface CreateChapterInput {
   projectId: number;
   title?: string;

@@ -148,3 +148,36 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+// Amendment A12: story threads. A thread is a standing narrative line (an arc, a
+// mystery, a promise, a relationship) that accumulates touches as chapters lock.
+// project_id NULL means series-wide, like canon_facts. character_a_id /
+// character_b_id are optional and used mainly by relationship threads.
+export const threads = sqliteTable("threads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectId: integer("project_id").references(() => projects.id), // NULL = series-wide
+  name: text("name").notNull(),
+  type: text("type").notNull(), // arc | mystery | promise | relationship
+  status: text("status").notNull().default("open"), // open | resolved | retired
+  characterAId: integer("character_a_id").references(() => characters.id),
+  characterBId: integer("character_b_id").references(() => characters.id),
+  note: text("note"), // author note, e.g. intended payoff
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
+// Amendment A12: a touch is one chapter's contact with a thread (advance,
+// complicate, payoff, or mention) with a verbatim evidence quote. source is
+// 'manual', 'extraction:<chapter_id>' (approved lock-time proposal), or 'mcp'.
+export const threadTouches = sqliteTable("thread_touches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  threadId: integer("thread_id")
+    .notNull()
+    .references(() => threads.id),
+  chapterId: integer("chapter_id")
+    .notNull()
+    .references(() => chapters.id),
+  kind: text("kind").notNull(), // advance | complicate | payoff | mention
+  evidence: text("evidence"), // verbatim quote from the chapter
+  source: text("source"), // manual | extraction:<chapter_id> | mcp
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});

@@ -8,15 +8,37 @@ import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "./db/schema";
 import { getLlmClient } from "./llm/client";
 import { summaryPrompt, extractionPrompt } from "./llm/prompts";
-import { parseExtractionResponse, type ExtractionResult } from "./llm/extraction";
+import {
+  parseExtractionResponse,
+  normalizeThreadProposals,
+  type FactProposal,
+  type StateProposal,
+  type ThreadAttachProposal,
+  type ThreadNewProposal,
+} from "./llm/extraction";
 import { logLlmCall } from "./repo/llm";
 import { assemblableCanon } from "./repo/canon";
 import { listCharacters } from "./repo/characters";
 import { updateChapter, type Chapter } from "./repo/chapters";
+import { listThreads } from "./repo/threads";
 import { orderToUiChapter } from "./chapterNumbering";
 import { modelFor } from "./modelFor";
 
 type Db = BetterSQLite3Database<typeof schema>;
+
+// The lock-time extraction result, with the raw thread proposals already
+// normalized (A12) against the book's existing open threads into attach vs
+// new-thread proposals for the approval checklist. Facts and states are unchanged
+// from parseExtractionResponse. A parse failure surfaces the raw text.
+export type CanonExtractionResult =
+  | {
+      ok: true;
+      facts: FactProposal[];
+      states: StateProposal[];
+      threadAttaches: ThreadAttachProposal[];
+      threadNews: ThreadNewProposal[];
+    }
+  | { ok: false; error: string; raw: string };
 
 // Generates and stores the chapter summary (purpose "summary", ~150 words,
 // factual, present tense), then sets the chapter to 'locked'. The model is resolved
@@ -61,11 +83,18 @@ export async function runCanonExtraction(
   chapter: Chapter,
   text: string,
   fixtureKey?: string,
-): Promise<ExtractionResult> {
+): Promise<CanonExtractionResult> {
   const currentCanon = assemblableCanon(db, { projectId: chapter.projectId }).map(
     (f) => `[${f.type}] ${f.content}`,
   );
   const knownCharacters = listCharacters(db).map((c) => c.name);
+  // A12: the book's open threads (its own plus series-wide) named in the prompt so
+  // the model attaches over duplicating; the same set drives attach-vs-new
+  // normalization below.
+  const openThreads = listThreads(db, {
+    projectId: chapter.projectId,
+    status: "open",
+  });
 
   const client = getLlmClient();
   const model = modelFor(db, "extraction");
@@ -78,6 +107,7 @@ export async function runCanonExtraction(
       text,
       currentCanon,
       knownCharacters,
+      openThreads: openThreads.map((t) => t.name),
     }),
     maxTokens: 2048,
     fixtureKey,
@@ -90,5 +120,17 @@ export async function runCanonExtraction(
     model,
   });
 
-  return parseExtractionResponse(res.text);
+  const parsed = parseExtractionResponse(res.text);
+  if (!parsed.ok) return parsed;
+  const { attaches, news } = normalizeThreadProposals(
+    parsed.threads,
+    openThreads.map((t) => ({ id: t.id, name: t.name })),
+  );
+  return {
+    ok: true,
+    facts: parsed.facts,
+    states: parsed.states,
+    threadAttaches: attaches,
+    threadNews: news,
+  };
 }

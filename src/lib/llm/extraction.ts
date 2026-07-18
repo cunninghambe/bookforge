@@ -4,6 +4,12 @@
 
 import { parseJson } from "./json";
 import { CANON_TYPES, type CanonType } from "../repo/canon";
+import {
+  isThreadType,
+  isTouchKind,
+  type ThreadType,
+  type TouchKind,
+} from "../repo/threads";
 
 export interface FactProposal {
   type: CanonType;
@@ -19,8 +25,25 @@ export interface StateProposal {
   evidenceQuote: string | null;
 }
 
+// Amendment A12: a raw thread proposal as the model returned it. isNew is only the
+// model's hint; the real attach-vs-new decision is made by normalizeThreadProposals
+// against the book's existing threads (name match wins). type may be null when the
+// model omitted it; a new-thread proposal without a type defaults to 'arc'.
+export interface ThreadProposal {
+  thread: string;
+  isNew: boolean;
+  type: ThreadType | null;
+  kind: TouchKind;
+  evidence: string | null;
+}
+
 export type ExtractionResult =
-  | { ok: true; facts: FactProposal[]; states: StateProposal[] }
+  | {
+      ok: true;
+      facts: FactProposal[];
+      states: StateProposal[];
+      threads: ThreadProposal[];
+    }
   | { ok: false; error: string; raw: string };
 
 function str(v: unknown): string | null {
@@ -50,7 +73,7 @@ export function parseExtractionResponse(text: string): ExtractionResult {
       raw: text,
     };
   }
-  const obj = root as { facts?: unknown; states?: unknown };
+  const obj = root as { facts?: unknown; states?: unknown; threads?: unknown };
   const facts: FactProposal[] = [];
   if (Array.isArray(obj.facts)) {
     for (const item of obj.facts) {
@@ -85,7 +108,85 @@ export function parseExtractionResponse(text: string): ExtractionResult {
       });
     }
   }
-  return { ok: true, facts, states };
+  // A12: the threads section is optional. A missing or non-array "threads" key
+  // parses as an empty list (old replies and the empty fixtures stay valid). A
+  // proposal needs a name and a valid touch kind; an unknown type degrades to
+  // null (resolved to 'arc' only if it becomes a new-thread proposal).
+  const threads: ThreadProposal[] = [];
+  if (Array.isArray(obj.threads)) {
+    for (const item of obj.threads) {
+      if (!item || typeof item !== "object") continue;
+      const t = item as Record<string, unknown>;
+      const name = str(t.thread);
+      if (!name) continue;
+      if (!isTouchKind(t.kind)) continue;
+      threads.push({
+        thread: name,
+        isNew: t.isNew === true,
+        type: isThreadType(t.type) ? t.type : null,
+        kind: t.kind,
+        evidence: str(t.evidence),
+      });
+    }
+  }
+  return { ok: true, facts, states, threads };
+}
+
+// A12: an attach proposal targets an existing thread by id (a name that matched an
+// open thread case-insensitively).
+export interface ThreadAttachProposal {
+  threadId: number;
+  name: string;
+  kind: TouchKind;
+  evidence: string | null;
+}
+
+// A12: a new-thread proposal. type is required to satisfy the CHECK constraint; a
+// proposal that omitted a type defaults to 'arc' (recorded, not invented silently).
+export interface ThreadNewProposal {
+  name: string;
+  type: ThreadType;
+  kind: TouchKind;
+  evidence: string | null;
+}
+
+// A12: splits raw thread proposals into attach vs new. A proposal whose name
+// matches an existing thread (case-insensitive, trimmed) is an attach against that
+// thread's id; anything else is a new-thread proposal. The model's isNew hint is
+// ignored: the name match is the source of truth so the model cannot duplicate a
+// thread by mislabeling it. existing is the set of threads the prompt advertised
+// (the book's open threads plus series-wide).
+export function normalizeThreadProposals(
+  proposals: ThreadProposal[],
+  existing: Array<{ id: number; name: string }>,
+): { attaches: ThreadAttachProposal[]; news: ThreadNewProposal[] } {
+  const byName = new Map<string, number>();
+  for (const e of existing) {
+    const key = e.name.trim().toLowerCase();
+    if (key && !byName.has(key)) byName.set(key, e.id);
+  }
+  const attaches: ThreadAttachProposal[] = [];
+  const news: ThreadNewProposal[] = [];
+  for (const p of proposals) {
+    const key = p.thread.trim().toLowerCase();
+    const matchId = byName.get(key);
+    if (matchId !== undefined) {
+      attaches.push({
+        threadId: matchId,
+        name: p.thread,
+        kind: p.kind,
+        evidence: p.evidence,
+      });
+    } else {
+      news.push({
+        name: p.thread,
+        type: p.type ?? "arc",
+        kind: p.kind,
+        evidence: p.evidence,
+      });
+    }
+  }
+  return { attaches, news };
 }
 
 export interface Contradiction {
