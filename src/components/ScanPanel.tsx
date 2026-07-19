@@ -105,6 +105,11 @@ export function ScanPanel({
   const [toOrder, setToOrder] = useState(maxOrder);
   const [includeTouched, setIncludeTouched] = useState(false);
   const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+    title: string;
+  } | null>(null);
   const [report, setReport] = useState<ScanReport | null>(null);
   const [attachGroups, setAttachGroups] = useState<AttachGroup[]>([]);
   const [newGroups, setNewGroups] = useState<NewGroup[]>([]);
@@ -225,6 +230,13 @@ export function ScanPanel({
     }
   }
 
+  // One chapter per HTTP request: no request ever spans more than one model
+  // call, so a book-sized run cannot outlive the infrastructure's patience (the
+  // production 502: chapter-length prompts run minutes each, and the original
+  // all-in-one request died partway). The server keeps the merge logic; each
+  // response returns the whole run's merged checklist so far, and a failed
+  // chapter (HTTP or model or parse) becomes its outcome row while the loop
+  // carries on (A2.2).
   async function run() {
     if (running || inRange.length === 0) return;
     setRunning(true);
@@ -233,33 +245,111 @@ export function ScanPanel({
     setAttachGroups([]);
     setNewGroups([]);
     setApprovedSummary(null);
-    const res = await fetch(`/api/projects/${projectId}/scan`, {
+    setProgress(null);
+
+    const planRes = await fetch(`/api/projects/${projectId}/scan`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fromOrder, toOrder, includeTouched, fixtureKey }),
+      body: JSON.stringify({ fromOrder, toOrder, includeTouched }),
     });
-    setRunning(false);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(data.error ?? `Scan failed (HTTP ${res.status}).`);
+    if (!planRes.ok) {
+      const data = (await planRes.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? `Scan failed (HTTP ${planRes.status}).`);
+      setRunning(false);
       return;
     }
-    const data = (await res.json()) as { report: ScanReport };
-    setReport(data.report);
+    const { plan } = (await planRes.json()) as {
+      plan: { targets: Array<{ chapterId: number; order: number; title: string }> };
+    };
+
+    const outcomes: ScanChapterOutcome[] = [];
+    const prior: Array<{
+      chapterId: number;
+      order: number;
+      proposals: unknown[];
+    }> = [];
+    let attaches: AttachGroupResp[] = [];
+    let news: NewGroupResp[] = [];
+
+    for (let i = 0; i < plan.targets.length; i += 1) {
+      const target = plan.targets[i];
+      setProgress({
+        current: i + 1,
+        total: plan.targets.length,
+        title: target.title,
+      });
+      try {
+        const res = await fetch(`/api/projects/${projectId}/scan/chapter`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chapterId: target.chapterId,
+            prior,
+            fixtureKey: fixtureKey ? `${fixtureKey}.${i + 1}` : undefined,
+          }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          outcomes.push({
+            chapterId: target.chapterId,
+            order: target.order,
+            title: target.title,
+            proposalCount: 0,
+            rawText: null,
+            parseError: null,
+            error: data.error ?? `HTTP ${res.status}`,
+          });
+          continue;
+        }
+        const data = (await res.json()) as {
+          outcome: ScanChapterOutcome;
+          proposals: { chapterId: number; order: number; proposals: unknown[] } | null;
+          attaches: AttachGroupResp[];
+          news: NewGroupResp[];
+        };
+        outcomes.push(data.outcome);
+        if (data.proposals) prior.push(data.proposals);
+        attaches = data.attaches;
+        news = data.news;
+      } catch (err) {
+        outcomes.push({
+          chapterId: target.chapterId,
+          order: target.order,
+          title: target.title,
+          proposalCount: 0,
+          rawText: null,
+          parseError: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const failedCount = outcomes.filter(
+      (o) => o.error !== null || o.parseError !== null,
+    ).length;
+    setReport({
+      chapters: outcomes,
+      attaches,
+      news,
+      scannedCount: outcomes.length,
+      failedCount,
+    });
     setAttachGroups(
-      data.report.attaches.map((g) => ({
+      attaches.map((g) => ({
         threadId: g.threadId,
         name: g.name,
         touches: g.touches.map((t) => ({ ...t, approved: false })),
       })),
     );
     setNewGroups(
-      data.report.news.map((g) => ({
+      news.map((g) => ({
         name: g.name,
         type: g.type,
         touches: g.touches.map((t) => ({ ...t, approved: false })),
       })),
     );
+    setProgress(null);
+    setRunning(false);
   }
 
   async function approve() {
@@ -414,8 +504,9 @@ export function ScanPanel({
 
           {running && !report && (
             <p data-testid="scan-progress" className="mt-2 text-sm text-info-ink">
-              Scanning {inRange.length} chapter
-              {inRange.length === 1 ? "" : "s"} in order...
+              {progress
+                ? `Scanning chapter ${progress.current} of ${progress.total}: ${progress.title}...`
+                : "Preparing the scan..."}
             </p>
           )}
 

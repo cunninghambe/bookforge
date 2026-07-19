@@ -1954,6 +1954,24 @@ Listen also lives), which is what an author wants from finished text. The
 Edit button and every existing testid are unchanged; a regression e2e
 (fix-chapter-links.spec.ts) pins both link targets and the click-through.
 
+## Scan 502 fix
+
+### D158: No HTTP request spans more than one model call; the client drives the scan
+
+The first production scan died as a 502 at 944 seconds: chapter-sized prompts
+run minutes per call on the claude-code transport, and the original design ran
+every chapter's call inside ONE request. Revised flow: POST .../scan only PLANS
+(returns the target list, no LLM); the client loops POST .../scan/chapter, one
+chapter per request, sending the run's raw proposal history so the server can
+statelessly rebuild the proposed-names feed-forward and return the whole run's
+merged checklist after each chapter (merge logic stays server-side and
+unit-tested in scanChapter/deriveProposedNames/accumulateScanProposals). A
+failed chapter, whether HTTP, model, or parse, becomes its outcome row and the
+loop continues (A2.2). Progress is now real ("chapter 3 of 24"), and the same
+per-position fixture routing is preserved, so the a17 e2e drives the new flow
+unchanged. The sweep shares the old single-request shape and the same latent
+risk on long ranges; flagged separately rather than smuggled into this fix.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

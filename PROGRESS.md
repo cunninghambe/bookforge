@@ -1892,3 +1892,16 @@ drafting inside the expanded editor, so a fully locked (imported) book had
 no way in. Titles are now links (pipeline chapters to draft, locked and
 in-review chapters to review), with a regression e2e pinning the targets
 and click-through. 448 unit + 52 e2e green. See D157.
+---
+
+## Scan 502 fix (2026-07-19)
+
+Field report: Run scan on the deployed trilogy returned "Scan failed (HTTP
+502)" after ~15 minutes; only chapter 1's call ever logged. Root cause: the
+A17 scan ran every per-chapter model call inside one HTTP request, and real
+chapters (huge prompts, minutes per call) pushed the request past what the
+serving chain tolerates. Fix: the scan endpoint now only plans; the client
+runs one chapter per request with real progress, per-chapter failure
+carry-through, and the merged checklist rebuilt server-side after each
+chapter. 448 unit green; a17 and a12 e2e green against the new flow; full
+suite green across runs under the documented load-flake protocol. See D158.
