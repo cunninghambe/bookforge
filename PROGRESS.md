@@ -1932,3 +1932,15 @@ transcode of voice notes to 16 kHz WAV with real error surfacing, and a
 player with a whole-chapter sequential warm loop, a visible synthesizing
 state, and tap-to-continue after a browser-rejected play. 456 unit tests;
 a14 e2e green.
+---
+
+## Pending-revision restore fix (2026-07-19)
+
+Field report: the author's first real revision (a 103 second call from a
+phone) completed server-side but the UI showed nothing, and nothing could
+ever show it: pending revisions lived only in the in-flight response. Now
+GET /api/drafts/[id]/revision restores the newest pending revision with
+deterministically recomputed hunks, the review page loads it on mount with
+a restored banner, and a dropped revise() connection auto-recovers. 458
+unit tests; phase4 e2e green including the new reload-restore regression.
+See D163.

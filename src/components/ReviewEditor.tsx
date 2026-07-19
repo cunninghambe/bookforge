@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { LockPanel } from "./LockPanel";
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
@@ -36,6 +36,9 @@ interface RevisionControl {
   failedPatches: FailedPatch[];
   retried: boolean;
   emDashUnresolved: boolean;
+  // Set by GET /api/drafts/[id]/revision when a persisted pending revision is
+  // restored after an interrupted call or a reload.
+  restored?: boolean;
   error?: string;
 }
 
@@ -179,6 +182,31 @@ export function ReviewEditor({
     if (res.ok) await refreshComments(draftId);
   }
 
+  // Loads a persisted pending revision, if any, into the resolution UI. Used on
+  // mount (a pending revision survives reloads and interrupted calls; the field
+  // report was a 103-second call whose response the phone browser lost, leaving
+  // durable server state with no way to reach it) and as recovery after a
+  // failed revise() call.
+  const loadPendingRevision = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/revision`);
+      if (!res.ok) return false;
+      const data = (await res.json()) as { revision: RevisionControl | null };
+      if (data.revision) {
+        setRevision(data.revision);
+        setDecisions({});
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [draftId]);
+
+  useEffect(() => {
+    void loadPendingRevision();
+  }, [loadPendingRevision]);
+
   async function revise() {
     if (revising || unresolvedCount === 0) return;
     setRevising(true);
@@ -187,31 +215,33 @@ export function ReviewEditor({
     setDecisions({});
     setSavedVersion(false);
 
-    const res = await fetch(`/api/drafts/${draftId}/revise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fixtureKey }),
-    });
-    if (!res.body) {
-      setRevising(false);
-      setError("No response body from revise.");
-      return;
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-    }
-    const delimIdx = buffer.indexOf(CONTROL_DELIM);
-    if (delimIdx === -1) {
-      setRevising(false);
-      setError("Revision stream ended without a control frame.");
-      return;
-    }
+    // Fully guarded (the chat-audit pattern): any mid-stream failure lands in
+    // the catch, which then checks whether the revision completed server-side
+    // anyway and restores it, so a dropped connection can no longer strand a
+    // pending revision behind a silent UI.
     try {
+      const res = await fetch(`/api/drafts/${draftId}/revise`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fixtureKey }),
+      });
+      if (!res.body) {
+        setError("No response body from revise.");
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+      }
+      const delimIdx = buffer.indexOf(CONTROL_DELIM);
+      if (delimIdx === -1) {
+        setError("Revision stream ended without a control frame.");
+        return;
+      }
       const control = JSON.parse(
         buffer.slice(delimIdx + CONTROL_DELIM.length),
       ) as RevisionControl;
@@ -221,9 +251,15 @@ export function ReviewEditor({
         setRevision(control);
       }
     } catch {
-      setError("Could not parse the revision control frame.");
+      const recovered = await loadPendingRevision();
+      setError(
+        recovered
+          ? "The connection dropped mid-revision, but the revision completed and was restored below."
+          : "The connection dropped during the revision. If it completed, reloading this page will show the proposed changes.",
+      );
+    } finally {
+      setRevising(false);
     }
-    setRevising(false);
   }
 
   function decide(index: number, decision: "accept" | "reject") {
@@ -380,6 +416,15 @@ export function ReviewEditor({
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {revision.restored && (
+              <div
+                data-testid="revision-restored"
+                className="mb-3 rounded border border-info-edge bg-info px-3 py-2 text-sm text-info-ink"
+              >
+                A pending revision from an earlier run was restored. Review and
+                resolve the proposed changes below; nothing has been applied yet.
               </div>
             )}
             {revision.retried && (

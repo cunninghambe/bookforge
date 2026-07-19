@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
 import type { FlaggedSpan } from "../revision/diff";
@@ -53,6 +53,29 @@ export function createRevision(db: Db, input: CreateRevisionInput): Revision {
     .returning()
     .get();
   return decode(row);
+}
+
+// The newest PENDING revision for a draft, or undefined. A pending revision is
+// durable state (the reason the revisions table stores old/new text and spans),
+// so the review page can restore hunk resolution after an interrupted call, a
+// tab discard, or a reload; only the newest matters because a fresh revise()
+// supersedes older pending ones.
+export function newestPendingRevisionForDraft(
+  db: Db,
+  draftId: number,
+): Revision | undefined {
+  const row = db
+    .select()
+    .from(schema.revisions)
+    .where(
+      and(
+        eq(schema.revisions.draftId, draftId),
+        eq(schema.revisions.status, "pending"),
+      ),
+    )
+    .orderBy(desc(schema.revisions.id))
+    .get();
+  return row ? decode(row) : undefined;
 }
 
 export function getRevision(db: Db, id: number): Revision | undefined {

@@ -2037,6 +2037,27 @@ the bottleneck), shows a visible synthesizing state while stalled, and turns a
 rejected play() into an explicit tap-to-continue prompt. Fixture-driven tests
 never stall, so every existing a14 assertion is unchanged.
 
+## Pending-revision restore fix
+
+### D163: A pending revision is reachable after the call that made it is gone
+
+Field failure: a 103 second revision call completed server-side (pending
+revision persisted, HTTP 200) but the phone browser lost the in-flight
+response, and the UI had no path to the durable state: hunks existed only in
+the streamed control frame's memory, so the author saw silence and even a
+reload showed nothing. Fixes: GET /api/drafts/[id]/revision returns the
+draft's newest pending revision in the exact control shape the stream
+delivers, with hunks recomputed deterministically from the stored old/new
+text (the same analyzeRevision call the resolve route makes); ReviewEditor
+loads it on mount and shows a restored banner; revise() is fully guarded
+(the chat-audit pattern) and on a dropped connection immediately checks for
+a completed pending revision and restores it. Transient call diagnostics
+(mode, failed patches, retry flags) are not persisted and restore with
+defaults; the substance (hunks, declared fixes) is exact. The gate is
+untouched: resolution still requires every unauthorized hunk decided through
+the resolve route. New unit coverage for newestPendingRevisionForDraft and
+an e2e that reloads mid-resolution and resolves from the restored state.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

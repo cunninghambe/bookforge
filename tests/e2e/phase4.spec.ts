@@ -138,6 +138,39 @@ test.describe("Phase 4: review and revision with diff enforcement", () => {
     expect(finalText).toBe(case4.expectedAccept);
   });
 
+
+  test("a pending revision survives a reload and resolves after restore", async ({
+    page,
+  }) => {
+    const id = await createChapterWithDraft(page, "Restore", case4.old);
+    await page.goto(`/book/1/chapter/${id}/review?fx=phase4`);
+    await attachComment(page, case4.flagQuote, "Tighten this.");
+    await page.getByTestId("revise-button").click();
+    await expect(page.getByTestId("unauthorized-panel")).toBeVisible({
+      timeout: 20000,
+    });
+
+    // The durable pending revision must be restorable: reload drops all client
+    // state (the field failure: a phone lost the in-flight response and the
+    // pending revision was stranded), and the page must recover it from the
+    // server with the restored marker shown.
+    await page.reload();
+    await expect(page.getByTestId("revision-restored")).toBeVisible();
+    await expect(page.getByTestId("unauthorized-panel")).toBeVisible();
+
+    // And it resolves normally from the restored state: reject every
+    // unauthorized hunk, then save.
+    const rejects = page.locator(
+      '[data-testid="unauthorized-panel"] [data-testid^="reject-hunk-"]',
+    );
+    const count = await rejects.count();
+    for (let i = 0; i < count; i += 1) {
+      await rejects.nth(i).click();
+    }
+    await page.getByTestId("save-revision-button").click();
+    await expect(page.getByTestId("revision-saved")).toBeVisible();
+  });
+
   test("an em-dash in a revision triggers a retry and the saved text is clean", async ({
     page,
   }) => {
