@@ -1972,6 +1972,51 @@ per-position fixture routing is preserved, so the a17 e2e drives the new flow
 unchanged. The sweep shares the old single-request shape and the same latent
 risk on long ranges; flagged separately rather than smuggled into this fix.
 
+## Amendment A18: sweep restructure
+
+### D159: the sweep is the scan 502 fix applied verbatim, one model call per request
+
+D158 flagged the sweep as carrying the same latent risk it had just fixed for the
+scan: chapter-sized prompts run minutes per call on the claude-code transport, and
+the old sweep ran every chapter's call inside ONE request, which on a real book
+outlives the serving chain and dies as a 502 partway through, discarding completed
+work. A18 applies the identical reshaping. POST .../sweep now only PLANS (validates
+the order range, returns the ordered locked-chapter targets, no LLM); the client
+loops POST .../sweep/chapter, one chapter per request, so no HTTP request ever
+spans more than one model call. Unlike the scan the sweep carries no cross-chapter
+state (each chapter is checked against the locked canon independently), so the
+per-chapter request needs no run history and the client aggregates the report by
+concatenation. Progress is now real ("chapter 3 of 24" naming the chapter), and the
+report is assembled as chapters complete so a mid-run failure loses only its own
+chapter's slice, never the ones already done.
+
+### D160: sweepChapter is the shared engine; runSweep delegates; MCP is untouched
+
+The single-chapter step is extracted as sweepChapter, exactly as runScan delegates
+to scanChapter. runSweep builds the shared prefix once and calls sweepChapter per
+chapter, so every existing sweep unit test still exercises the same engine through
+runSweep, and the new per-chapter endpoint calls sweepChapter directly. A per-call
+LLM or parse failure becomes the returned report entry's error fields (A2.2), never
+a throw; a missing or non-locked chapter is a request-level error and throws, which
+the endpoint surfaces with its reason (mirroring scanChapter). The MCP sweep_book
+tool still calls runSweep in-process over stdio with no HTTP hop, so the 502 mode
+does not exist there and it is unchanged.
+
+### D161: the A4.1 prefix is rebuilt per request, byte-identical; no spec adjustment needed
+
+The A4.1 cacheable locked-canon prefix is built by sweepCanonPrefix, which both
+runSweep (once per run) and the per-chapter endpoint (once per request) call over
+the same series canon, so the bytes are identical and provider-side prompt caching
+keeps hitting across a client-driven run. The prompts themselves (sweepPrefix,
+sweepChapterPrompt) are untouched, so the prompt-construction and cache tests hold
+unchanged, and a unit test now pins sweepCanonPrefix to sweepPrefix over the book's
+assemblable canon. Per-position fixture routing (base key plus the 1-based position
+in the swept set) is preserved: the client rebuilds the same suffix the old run
+built, so the existing sweep fixtures drive the new flow and both sweep e2e specs
+(the phase5 planted contradiction and the a2 per-chapter error surfacing) pass
+unchanged. Neither spec asserted the old transport mechanics; both drive the UI and
+assert outcomes, so no spec was adjusted.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

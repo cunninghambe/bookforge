@@ -33,9 +33,18 @@ interface SweepReport {
 }
 
 // Drives the consistency sweep (SPEC section 6). Shows the chapter-count estimate
-// before running, a range selector over the locked chapters, a progress indicator
-// while the sequential run is in flight, and the aggregated report. A chapter whose
-// response failed to parse shows its raw text rather than being dropped.
+// before running, a range selector over the locked chapters, live progress naming
+// the chapter under sweep, and the aggregated report assembled as chapters
+// complete. A chapter whose response failed to parse shows its raw text rather than
+// being dropped; a per-chapter failure (HTTP, model, or parse) becomes its report
+// entry while the loop carries on (A2.2).
+//
+// Amendment A18: the run is client-driven. One HTTP request per chapter, so no
+// request ever spans more than one model call, and a book-sized run cannot outlive
+// the infrastructure's patience (the production 502 D158 documents: chapter-length
+// prompts run minutes each, and the original all-in-one request died partway,
+// discarding completed work). POST .../sweep only plans the target list; the loop
+// then hits POST .../sweep/chapter once per chapter.
 export function SweepRunner({
   projectId,
   lockedChapters,
@@ -53,6 +62,11 @@ export function SweepRunner({
   const [fromOrder, setFromOrder] = useState(minOrder);
   const [toOrder, setToOrder] = useState(maxOrder);
   const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+    title: string;
+  } | null>(null);
   const [report, setReport] = useState<SweepReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,22 +83,98 @@ export function SweepRunner({
     setRunning(true);
     setError(null);
     setReport(null);
-    const res = await fetch(`/api/projects/${projectId}/sweep`, {
+    setProgress(null);
+
+    // Plan the run (no LLM). A whole-run failure here surfaces its reason; per
+    // chapter failures below carry their own reason inside the report.
+    const planRes = await fetch(`/api/projects/${projectId}/sweep`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fromOrder, toOrder, fixtureKey }),
+      body: JSON.stringify({ fromOrder, toOrder }),
     });
-    setRunning(false);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      // A2.2: never a bare "Sweep failed." with no reason. The route returns the
-      // underlying message; if the body is somehow missing, fall back to the HTTP
-      // status so a reason is always shown.
-      setError(data.error ?? `Sweep failed (HTTP ${res.status}).`);
+    if (!planRes.ok) {
+      const data = (await planRes.json().catch(() => ({}))) as { error?: string };
+      // A2.2: never a bare "Sweep failed." with no reason.
+      setError(data.error ?? `Sweep failed (HTTP ${planRes.status}).`);
+      setRunning(false);
       return;
     }
-    const data = (await res.json()) as { report: SweepReport };
-    setReport(data.report);
+    const { plan } = (await planRes.json()) as {
+      plan: {
+        targets: Array<{ chapterId: number; order: number; title: string }>;
+      };
+    };
+
+    // One chapter per request. The report is assembled as each chapter completes,
+    // so completed work stays visible even if a later chapter fails.
+    const chapters: ChapterReport[] = [];
+    for (let i = 0; i < plan.targets.length; i += 1) {
+      const target = plan.targets[i];
+      setProgress({
+        current: i + 1,
+        total: plan.targets.length,
+        title: target.title,
+      });
+      try {
+        const res = await fetch(`/api/projects/${projectId}/sweep/chapter`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chapterId: target.chapterId,
+            // Preserve per-position fixture routing: base key plus the 1-based
+            // position in the swept set, matching the fixtures the old single
+            // request run used (D25). The real client ignores fixtureKey.
+            fixtureKey: fixtureKey ? `${fixtureKey}.${i + 1}` : undefined,
+          }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          chapters.push({
+            chapterId: target.chapterId,
+            order: target.order,
+            title: target.title,
+            contradictions: [],
+            rawText: null,
+            parseError: null,
+            error: data.error ?? `HTTP ${res.status}`,
+          });
+        } else {
+          const data = (await res.json()) as { report: ChapterReport };
+          chapters.push(data.report);
+        }
+      } catch (err) {
+        chapters.push({
+          chapterId: target.chapterId,
+          order: target.order,
+          title: target.title,
+          contradictions: [],
+          rawText: null,
+          parseError: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      setReport({
+        chapters: [...chapters],
+        totalContradictions: chapters.reduce(
+          (n, c) => n + c.contradictions.length,
+          0,
+        ),
+      });
+    }
+
+    // Always land on a final report, matching the old single-request behavior
+    // where an empty range still rendered an empty (zero-chapter) report.
+    setReport({
+      chapters,
+      totalContradictions: chapters.reduce(
+        (n, c) => n + c.contradictions.length,
+        0,
+      ),
+    });
+    setProgress(null);
+    setRunning(false);
   }
 
   if (lockedChapters.length === 0) {
@@ -150,8 +240,9 @@ export function SweepRunner({
           data-testid="sweep-progress"
           className="mt-2 text-sm text-info-ink"
         >
-          Sweeping {inRange.length} chapter{inRange.length === 1 ? "" : "s"} in
-          order...
+          {progress
+            ? `Sweeping chapter ${progress.current} of ${progress.total}: ${progress.title}...`
+            : "Preparing the sweep..."}
         </p>
       )}
 

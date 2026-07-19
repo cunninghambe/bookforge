@@ -39,7 +39,8 @@ export interface SweepInput {
 }
 
 // Locked chapters in the book whose order_index falls in the range, in order.
-// This is what the estimate (chapter count) is drawn from before running.
+// This is what the estimate (chapter count) is drawn from before running, and what
+// the plan endpoint returns for the client-driven loop (A18).
 export function sweepableChapters(
   db: Db,
   args: { projectId: number; fromOrder: number; toOrder: number },
@@ -52,100 +53,151 @@ export function sweepableChapters(
   );
 }
 
+// The A4.1 cacheable locked-canon prefix: identical for every chapter in a run, so
+// it is the shared prompt prefix chapters 2..N read from the cache. Rebuilt per
+// request by the per-chapter endpoint (A18) and once per run by runSweep; both
+// produce byte-identical bytes because they call this same builder over the same
+// series canon, so provider-side prompt caching keeps working across the run.
+export function sweepCanonPrefix(db: Db, projectId: number): string {
+  const lockedCanon = assemblableCanon(db, { projectId }).map((f) => f.content);
+  return sweepPrefix(lockedCanon);
+}
+
+export interface SweepChapterInput {
+  chapterId: number;
+  projectId: number;
+  // The A4.1 locked-canon prefix (from sweepCanonPrefix), passed in so both callers
+  // send the identical shared prefix and the provider cache hits across a run.
+  prefix: string;
+  fixtureKey?: string;
+  model: string;
+}
+
+// Sweeps ONE locked chapter: builds the remainder prompt, makes the single LLM
+// call against the shared canon prefix, logs it, and parses the reply. Exactly one
+// model call per invocation, so an HTTP request wrapping this can never outlive one
+// call (the A18 502 fix, mirroring scanChapter). A thrown LLM error or a parse
+// failure becomes the report's error fields (A2.2), never a throw; a missing or
+// non-locked chapter is a request-level error and throws (the caller surfaces the
+// reason).
+export async function sweepChapter(
+  db: Db,
+  client: LlmClient,
+  input: SweepChapterInput,
+): Promise<SweepChapterReport> {
+  const chapter = listChapters(db, input.projectId).find(
+    (c) => c.id === input.chapterId,
+  );
+  if (!chapter || chapter.status !== "locked") {
+    throw new Error(
+      `chapter ${input.chapterId} is not a locked chapter of this book`,
+    );
+  }
+  const draft = latestDraft(db, chapter.id);
+  const text = draft?.content ?? "";
+  const number = orderToUiChapter(chapter.orderIndex);
+  const title = chapter.title ?? `Chapter ${number}`;
+
+  const prompt = sweepChapterPrompt({
+    chapterNumber: number,
+    chapterTitle: title,
+    text,
+  });
+
+  // A2.2: a per-chapter LLM call failure becomes a report entry naming the chapter
+  // and the error message, so a client-driven run can carry it as this chapter's
+  // slice and continue to the remaining chapters rather than aborting the run.
+  let res;
+  try {
+    res = await client.complete({
+      purpose: "sweep",
+      model: input.model,
+      promptPrefix: input.prefix,
+      prompt,
+      maxTokens: 2048,
+      fixtureKey: input.fixtureKey,
+    });
+  } catch (err) {
+    return {
+      chapterId: chapter.id,
+      order: number,
+      title,
+      contradictions: [],
+      rawText: null,
+      parseError: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+  logLlmCall(db, {
+    purpose: "sweep",
+    chapterId: chapter.id,
+    inputTokens: res.inputTokens,
+    outputTokens: res.outputTokens,
+    cacheReadTokens: res.cacheReadTokens,
+    cacheWriteTokens: res.cacheWriteTokens,
+    model: input.model,
+  });
+
+  const parsed = parseSweepResponse(res.text);
+  if (parsed.ok) {
+    return {
+      chapterId: chapter.id,
+      order: number,
+      title,
+      contradictions: parsed.contradictions,
+      rawText: null,
+      parseError: null,
+      error: null,
+    };
+  }
+  return {
+    chapterId: chapter.id,
+    order: number,
+    title,
+    contradictions: [],
+    rawText: parsed.raw,
+    parseError: parsed.error,
+    error: null,
+  };
+}
+
 // Runs the consistency sweep sequentially, one LLM call per locked chapter in the
-// range, aggregating contradictions. Every call is logged. Defensive parsing keeps
-// an unparseable chapter in the report with its raw text.
+// range, aggregating contradictions. Delegates each chapter to sweepChapter, the
+// shared engine the per-chapter endpoint also calls (A18), so every existing sweep
+// test exercises the same single-chapter step. Every call is logged. Defensive
+// parsing keeps an unparseable chapter in the report with its raw text. The
+// in-process MCP sweep_book tool calls this over stdio (no HTTP hop), so the 502
+// failure mode does not apply there and it is unchanged.
 export async function runSweep(
   db: Db,
   client: LlmClient,
   input: SweepInput,
 ): Promise<SweepReport> {
   const chapters = sweepableChapters(db, input);
-  const lockedCanon = assemblableCanon(db, { projectId: input.projectId }).map(
-    (f) => f.content,
-  );
   // A4.1: the locked-canon block is identical for every chapter, so it is the
-  // shared cacheable prefix; chapters 2..N of a run read it from the cache.
-  const prefix = sweepPrefix(lockedCanon);
+  // shared cacheable prefix; chapters 2..N of a run read it from the cache. Built
+  // once here and passed to each sweepChapter call, byte-identical to the prefix
+  // the per-chapter endpoint rebuilds per request.
+  const prefix = sweepCanonPrefix(db, input.projectId);
 
   const reports: SweepChapterReport[] = [];
   let position = 0;
   for (const chapter of chapters) {
     position += 1;
-    const draft = latestDraft(db, chapter.id);
-    const text = draft?.content ?? "";
-    const number = orderToUiChapter(chapter.orderIndex);
-    const title = chapter.title ?? `Chapter ${number}`;
-
-    const prompt = sweepChapterPrompt({
-      chapterNumber: number,
-      chapterTitle: title,
-      text,
-    });
     // Per-chapter fixture routing: base key plus the 1-based position in the swept
     // set, so each chapter can return a distinct fixture in tests. The real client
-    // ignores fixtureKey (D25).
+    // ignores fixtureKey (D25). The client-driven loop rebuilds this same suffix.
     const fixtureKey = input.fixtureKey
       ? `${input.fixtureKey}.${position}`
       : undefined;
-
-    // A2.2: a per-chapter LLM call failure becomes a report entry naming the
-    // chapter and the error message, and the loop continues to the remaining
-    // chapters rather than aborting the whole run.
-    let res;
-    try {
-      res = await client.complete({
-        purpose: "sweep",
-        model: input.model,
-        promptPrefix: prefix,
-        prompt,
-        maxTokens: 2048,
-        fixtureKey,
-      });
-    } catch (err) {
-      reports.push({
-        chapterId: chapter.id,
-        order: number,
-        title,
-        contradictions: [],
-        rawText: null,
-        parseError: null,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      continue;
-    }
-    logLlmCall(db, {
-      purpose: "sweep",
+    const report = await sweepChapter(db, client, {
       chapterId: chapter.id,
-      inputTokens: res.inputTokens,
-      outputTokens: res.outputTokens,
-      cacheReadTokens: res.cacheReadTokens,
-      cacheWriteTokens: res.cacheWriteTokens,
+      projectId: input.projectId,
+      prefix,
+      fixtureKey,
       model: input.model,
     });
-
-    const parsed = parseSweepResponse(res.text);
-    if (parsed.ok) {
-      reports.push({
-        chapterId: chapter.id,
-        order: number,
-        title,
-        contradictions: parsed.contradictions,
-        rawText: null,
-        parseError: null,
-        error: null,
-      });
-    } else {
-      reports.push({
-        chapterId: chapter.id,
-        order: number,
-        title,
-        contradictions: [],
-        rawText: parsed.raw,
-        parseError: parsed.error,
-        error: null,
-      });
-    }
+    reports.push(report);
   }
 
   const totalContradictions = reports.reduce(

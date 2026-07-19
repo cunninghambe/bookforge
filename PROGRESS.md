@@ -1905,3 +1905,16 @@ runs one chapter per request with real progress, per-chapter failure
 carry-through, and the merged checklist rebuilt server-side after each
 chapter. 448 unit green; a17 and a12 e2e green against the new flow; full
 suite green across runs under the documented load-flake protocol. See D158.
+---
+
+## Amendment A18: Sweep restructured to one model call per request (2026-07-19)
+
+Status: COMPLETE. The D158 scan fix applied to the sweep: the sweep endpoint
+plans only, a per-chapter endpoint runs exactly one model call per request
+with byte-identical prompts (pinned by the existing prompt and cache tests
+plus a new prefix byte-equality test), SweepRunner drives the loop with real
+progress and A2.2 per-chapter failure carry-through, fixture routing is
+preserved, and MCP sweep_book stays in-process and untouched. 453 unit
+tests; sweep e2e green in every run; full-suite results per the documented
+load-flake protocol with every spec green in isolation. See D159 through
+D161.

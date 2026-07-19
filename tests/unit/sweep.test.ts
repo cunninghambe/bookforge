@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { testDb } from "./helpers";
-import { runSweep, sweepableChapters } from "@/lib/sweep";
+import {
+  runSweep,
+  sweepableChapters,
+  sweepChapter,
+  sweepCanonPrefix,
+} from "@/lib/sweep";
+import { sweepPrefix } from "@/lib/llm/prompts";
+import { assemblableCanon } from "@/lib/repo/canon";
 import { createChapter, updateChapter } from "@/lib/repo/chapters";
 import { createDraftVersion } from "@/lib/repo/drafts";
 import type {
@@ -141,5 +148,113 @@ describe("runSweep aggregation", () => {
     expect(ids).toContain(b.id);
     // The planned (unlocked) chapter in the range is excluded.
     expect(ids).not.toContain(planned.id);
+  });
+});
+
+// A18: the extracted single-chapter step the per-chapter endpoint calls (exactly as
+// the scan/chapter route calls scanChapter). runSweep delegates to it, so the
+// aggregation tests above already exercise it; these pin the per-request contract.
+describe("sweepChapter: the extracted single-chapter step (A18)", () => {
+  it("returns one chapter's parsed contradictions", async () => {
+    const { db } = testDb();
+    const a = lockedChapterWithDraft(db, "A", "Two moons rose over the ridge.");
+    const client = scriptedClient([
+      JSON.stringify([
+        {
+          chapter: 1,
+          quote: "Two moons rose",
+          conflicting_fact: "There is one moon.",
+          severity: "high",
+        },
+      ]),
+    ]);
+
+    const report = await sweepChapter(db, client, {
+      chapterId: a.id,
+      projectId: 1,
+      prefix: sweepCanonPrefix(db, 1),
+      model: "test-model",
+    });
+
+    expect(report.chapterId).toBe(a.id);
+    expect(report.order).toBe(1);
+    expect(report.error).toBeNull();
+    expect(report.parseError).toBeNull();
+    expect(report.contradictions).toHaveLength(1);
+    expect(report.contradictions[0].severity).toBe("high");
+  });
+
+  it("surfaces a parse failure as raw text without throwing", async () => {
+    const { db } = testDb();
+    const a = lockedChapterWithDraft(db, "A", "text a");
+    const client = scriptedClient(["the model wrote prose instead of JSON"]);
+
+    const report = await sweepChapter(db, client, {
+      chapterId: a.id,
+      projectId: 1,
+      prefix: sweepCanonPrefix(db, 1),
+      model: "test-model",
+    });
+
+    expect(report.parseError).not.toBeNull();
+    expect(report.rawText).toBe("the model wrote prose instead of JSON");
+    expect(report.contradictions).toHaveLength(0);
+    expect(report.error).toBeNull();
+  });
+
+  it("turns a thrown LLM call into an error entry, never a throw (A2.2)", async () => {
+    const { db } = testDb();
+    const a = lockedChapterWithDraft(db, "A", "text a");
+    const client: LlmClient = {
+      async complete(): Promise<CompleteResult> {
+        throw new Error("boom: model unavailable");
+      },
+      async *stream() {
+        return { text: "", inputTokens: 0, outputTokens: 0 };
+      },
+    };
+
+    const report = await sweepChapter(db, client, {
+      chapterId: a.id,
+      projectId: 1,
+      prefix: sweepCanonPrefix(db, 1),
+      model: "test-model",
+    });
+
+    expect(report.error).toBe("boom: model unavailable");
+    expect(report.contradictions).toHaveLength(0);
+    expect(report.rawText).toBeNull();
+    expect(report.parseError).toBeNull();
+  });
+
+  it("throws (a request-level error) for a chapter that is not a locked chapter of the book", async () => {
+    const { db } = testDb();
+    const planned = createChapter(db, { projectId: 1, title: "Planned" });
+    const client = scriptedClient(["[]"]);
+
+    await expect(
+      sweepChapter(db, client, {
+        chapterId: planned.id,
+        projectId: 1,
+        prefix: sweepCanonPrefix(db, 1),
+        model: "test-model",
+      }),
+    ).rejects.toThrow(/not a locked chapter/);
+  });
+});
+
+// A18: the plan endpoint returns exactly sweepableChapters (covered above), and the
+// A4.1 shared prefix it and runSweep both send must be byte-identical, so the
+// provider cache hits across a client-driven run. This pins the prefix builder to
+// sweepPrefix over the book's assemblable canon.
+describe("sweepCanonPrefix: the A4.1 shared prefix, rebuilt per request (A18)", () => {
+  it("is byte-identical to sweepPrefix over the book's assemblable canon", () => {
+    const { db } = testDb();
+    lockedChapterWithDraft(db, "A", "text a");
+    const expected = sweepPrefix(
+      assemblableCanon(db, { projectId: 1 }).map((f) => f.content),
+    );
+    expect(sweepCanonPrefix(db, 1)).toBe(expected);
+    expect(sweepCanonPrefix(db, 1)).toContain("LOCKED CANON");
   });
 });
