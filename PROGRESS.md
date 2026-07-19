@@ -1805,3 +1805,47 @@ See D132 through D139. Residual gap recorded in D136: a few small quiet
 text-link controls do not get the 44px floor. The real-phone acceptance
 pass (login, palette, read, listen, speak a note over HTTPS) is the
 author's manual step.
+---
+
+## Amendment A16: Multiple series, and creating books
+
+Status: COMPLETE. 439 unit tests and 49 e2e tests green in single clean runs
+(implementer and orchestrator independently); tsc clean.
+
+### What was built
+
+- series as a first-class table; projects, canon_facts, characters, and
+  threads carry series_id (guarded ALTERs). Backfill runs inside migrate:
+  orphan rows get-or-create "The Trilogy" and file under it, a no-op on
+  migrated and fresh databases alike. The keystone acceptance is unit-tested
+  both as re-migrate idempotence and as a genuine pre-A16 upgrade: an
+  existing chapter's assembled prompt and system are byte-identical across
+  the migration.
+- The scoping sweep covered ten seams, each with a cross-series isolation
+  unit test: assemblableCanon (feeding assembler, chat, sweep, extraction,
+  interrogation), the assembler roster plus story-so-far prior-book
+  filtering (a real cross-series leak caught in development), chat context,
+  sweep prefix, extraction known-characters and open threads, bible import
+  dedup and approval, character listing and name lookup, thread listing,
+  search triggers plus the seriesId filter and per-series thread deep-links,
+  and listCanon.
+- Creating a new series copies the five seed style rules into it (locked,
+  source seed) and creates its first book, so a fresh series starts with the
+  standing style contract and a place to write.
+- UI: the home page groups books by series (BooksManager) with series
+  rename, per-series New book, New series, and inline book rename; /canon
+  and /characters gain a calm series switcher (canon scoped per series so
+  copied seed rules do not pile up in one list, D148).
+- API: POST and PATCH for series and projects; seriesId accepted across
+  canon, characters, search, bible, and threads routes. MCP: series_list,
+  series_create, book_create, book_rename; canon_add and thread_create
+  require a series when no project is given. 29 tools total; gate
+  discipline untouched.
+
+### Judgment calls
+
+See D140 through D148: repos stay lenient (default first series) while MCP
+is the strict layer (D141); per-series order_index; characters GET without
+seriesId returns all for back-compat; the canon page series switcher as the
+one UI addition beyond the SPEC's literal list, forced by the
+never-weaken-a-test rule (D148).

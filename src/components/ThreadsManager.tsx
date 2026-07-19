@@ -60,9 +60,11 @@ interface Character {
 
 export function ThreadsManager({
   projectId,
+  seriesId,
   highlightId,
 }: {
   projectId: number;
+  seriesId?: number | null;
   highlightId?: number | null;
 }) {
   const [threads, setThreads] = useState<ThreadRow[]>([]);
@@ -78,10 +80,14 @@ export function ThreadsManager({
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     setLoading(true);
+    const charactersUrl =
+      seriesId === null || seriesId === undefined
+        ? `/api/characters`
+        : `/api/characters?seriesId=${seriesId}`;
     const [threadsRes, chaptersRes, charactersRes] = await Promise.all([
       fetch(`/api/threads?projectId=${projectId}`),
       fetch(`/api/chapters?projectId=${projectId}`),
-      fetch(`/api/characters`),
+      fetch(charactersUrl),
     ]);
     const threadsData = await threadsRes.json().catch(() => ({}));
     const chaptersData = await chaptersRes.json().catch(() => ({}));
@@ -91,7 +97,7 @@ export function ThreadsManager({
     setChapters(chaptersData.chapters ?? []);
     setCharacters(charactersData.characters ?? []);
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, seriesId]);
 
   useEffect(() => {
     load();

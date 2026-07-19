@@ -9,16 +9,34 @@ import {
 // statements live in migrate.ts (applied idempotently). Drizzle uses these for
 // typed query building only.
 
-export const projects = sqliteTable("projects", {
+// Amendment A16: a series is the first-class container that scopes canon,
+// characters, and threads. A book (project) belongs to exactly one series.
+// project_id NULL on canon and threads means "series-wide WITHIN that row's
+// series", never global.
+export const series = sqliteTable("series", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   title: text("title").notNull(),
   orderIndex: integer("order_index").notNull(),
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 });
 
+export const projects = sqliteTable("projects", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  orderIndex: integer("order_index").notNull(),
+  // A16: the owning series. NOT NULL semantics are enforced in code (the guarded
+  // ALTER in migrate.ts cannot add a NOT NULL column to an existing table); the
+  // migration backfill assigns every pre-A16 project to the "The Trilogy" series.
+  seriesId: integer("series_id").references(() => series.id),
+  createdAt: text("created_at").default(sql`(datetime('now'))`),
+});
+
 export const canonFacts = sqliteTable("canon_facts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  projectId: integer("project_id").references(() => projects.id), // NULL = series-wide
+  projectId: integer("project_id").references(() => projects.id), // NULL = series-wide within seriesId
+  // A16: the owning series. For a book fact this equals the book's series; for a
+  // series-wide fact (project_id NULL) it names which series the fact spans.
+  seriesId: integer("series_id").references(() => series.id),
   type: text("type").notNull(), // world_rule | style_rule | timeline_event | character_fact | plot_decision
   content: text("content").notNull(),
   status: text("status").notNull().default("provisional"), // locked | provisional | retired
@@ -28,6 +46,9 @@ export const canonFacts = sqliteTable("canon_facts", {
 
 export const characters = sqliteTable("characters", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  // A16: the owning series. A character belongs to exactly one series; there is
+  // no cross-series sharing (create the character again in the other series).
+  seriesId: integer("series_id").references(() => series.id),
   name: text("name").notNull(),
   role: text("role"),
   voiceRules: text("voice_rules"),
@@ -155,7 +176,10 @@ export const settings = sqliteTable("settings", {
 // character_b_id are optional and used mainly by relationship threads.
 export const threads = sqliteTable("threads", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  projectId: integer("project_id").references(() => projects.id), // NULL = series-wide
+  projectId: integer("project_id").references(() => projects.id), // NULL = series-wide within seriesId
+  // A16: the owning series. For a book thread this equals the book's series; for
+  // a series-wide thread (project_id NULL) it names which series it spans.
+  seriesId: integer("series_id").references(() => series.id),
   name: text("name").notNull(),
   type: text("type").notNull(), // arc | mystery | promise | relationship
   status: text("status").notNull().default("open"), // open | resolved | retired

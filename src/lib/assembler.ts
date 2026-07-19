@@ -113,7 +113,12 @@ export function assemblePrompt(db: Db, input: AssembleInput): AssembledPrompt {
   const pov = chapter.pov ?? "omniscient";
   const system = draftSystemPrompt({ styleRules, pov });
 
-  const allChars = listCharacters(db).map((c) => ({ id: c.id, name: c.name }));
+  // A16: characters available to a book are its series' characters only.
+  const seriesId = getProject(db, chapter.projectId)?.seriesId ?? undefined;
+  const allChars = listCharacters(db, seriesId).map((c) => ({
+    id: c.id,
+    name: c.name,
+  }));
   const appearing = appearingCharacters(chapter, allChars);
   const appearingNames = appearing.map((c) => c.name);
 
@@ -321,8 +326,13 @@ function buildStorySoFar(db: Db, chapter: Chapter): string {
 
   // One-line note per prior book, derived from that book's last locked chapter
   // summary if present. Book-level summaries are not stored (see DECISIONS D12).
+  // A16: prior books are the earlier books OF THIS BOOK'S SERIES only, never a
+  // different series' books that happen to share an order_index.
+  const thisProject = getProject(db, chapter.projectId);
   const priorBooks = listProjects(db).filter(
-    (p) => p.orderIndex < (getProject(db, chapter.projectId)?.orderIndex ?? 0),
+    (p) =>
+      p.seriesId === (thisProject?.seriesId ?? null) &&
+      p.orderIndex < (thisProject?.orderIndex ?? 0),
   );
   for (const b of priorBooks) {
     parts.push(`Prior book "${b.title}": see its locked chapters.`);

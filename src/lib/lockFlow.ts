@@ -20,6 +20,7 @@ import { logLlmCall } from "./repo/llm";
 import { assemblableCanon } from "./repo/canon";
 import { listCharacters } from "./repo/characters";
 import { updateChapter, type Chapter } from "./repo/chapters";
+import { getProject } from "./repo/projects";
 import { listThreads } from "./repo/threads";
 import { orderToUiChapter } from "./chapterNumbering";
 import { modelFor } from "./modelFor";
@@ -87,7 +88,9 @@ export async function runCanonExtraction(
   const currentCanon = assemblableCanon(db, { projectId: chapter.projectId }).map(
     (f) => `[${f.type}] ${f.content}`,
   );
-  const knownCharacters = listCharacters(db).map((c) => c.name);
+  // A16: the extraction character map is the book's series' characters only.
+  const seriesId = getProject(db, chapter.projectId)?.seriesId ?? undefined;
+  const knownCharacters = listCharacters(db, seriesId).map((c) => c.name);
   // A12: the book's open threads (its own plus series-wide) named in the prompt so
   // the model attaches over duplicating; the same set drives attach-vs-new
   // normalization below.

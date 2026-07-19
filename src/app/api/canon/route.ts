@@ -23,12 +23,18 @@ export async function GET(req: Request) {
   const type = url.searchParams.get("type");
   const status = url.searchParams.get("status");
   const scope = url.searchParams.get("scope");
+  const seriesIdRaw = url.searchParams.get("seriesId");
+  const seriesId =
+    seriesIdRaw !== null && Number.isFinite(Number(seriesIdRaw))
+      ? Number(seriesIdRaw)
+      : undefined;
   const facts = listCanon(db, {
     type: CANON_TYPES.includes(type as CanonType) ? (type as CanonType) : undefined,
     status: CANON_STATUSES.includes(status as CanonStatus)
       ? (status as CanonStatus)
       : undefined,
     scope: parseScope(scope),
+    seriesId,
   });
   return NextResponse.json({ facts });
 }
@@ -42,6 +48,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 
+  // A16: an explicit series for a series-wide fact (project_id null); inferred
+  // from the project otherwise, else defaulted to the first series by the repo.
+  const seriesId =
+    typeof body.seriesId === "number" ? body.seriesId : undefined;
+
   // Bulk paste path.
   if (body.bulk === true) {
     const type = body.type as string;
@@ -53,6 +64,7 @@ export async function POST(req: Request) {
       type: type as CanonType,
       projectId:
         typeof body.projectId === "number" ? body.projectId : null,
+      seriesId,
     });
     return NextResponse.json({ facts }, { status: 201 });
   }
@@ -70,6 +82,7 @@ export async function POST(req: Request) {
     type: type as CanonType,
     content: content.trim(),
     projectId: typeof body.projectId === "number" ? body.projectId : null,
+    seriesId,
     status: CANON_STATUSES.includes(status as CanonStatus)
       ? (status as CanonStatus)
       : "provisional",

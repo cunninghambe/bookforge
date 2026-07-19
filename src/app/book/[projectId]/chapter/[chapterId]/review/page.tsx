@@ -25,7 +25,10 @@ export default async function ReviewPage({
   if (!chapter || !project) notFound();
   const draft = latestDraft(db, chapter.id);
   const comments = draft ? listComments(db, draft.id, draft.content) : [];
-  const characters = listCharacters(db).map((c) => ({ id: c.id, name: c.name }));
+  // A16: @-mention suggestions are the book's series' characters only.
+  const characters = listCharacters(db, project.seriesId ?? undefined).map(
+    (c) => ({ id: c.id, name: c.name }),
+  );
 
   return (
     <main>

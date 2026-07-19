@@ -7,6 +7,11 @@ import { orderToUiChapter, uiChapterToOrder } from "@/lib/chapterNumbering";
 interface Project {
   id: number;
   title: string;
+  seriesId: number | null;
+}
+interface SeriesOpt {
+  id: number;
+  title: string;
 }
 interface Character {
   id: number;
@@ -27,25 +32,38 @@ interface CharacterState {
 }
 
 export function CharactersManager({
+  series,
   projects,
+  initialSeriesId,
   highlightId,
 }: {
+  series: SeriesOpt[];
   projects: Project[];
+  initialSeriesId?: number | null;
   highlightId?: number | null;
 }) {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [adding, setAdding] = useState(false);
+  // A16: the roster is scoped to one series via a calm switcher, defaulting to
+  // the first series (or the highlighted character's series on a deep link).
+  const [seriesId, setSeriesId] = useState<number | null>(
+    initialSeriesId ?? series[0]?.id ?? null,
+  );
   // A11: ?highlight=<characterId> scrolls to that card and flashes it briefly
   // (D107). flashedForRef remembers which id was already flashed so re-renders
   // do not re-flash, while a later deep-link to a different card still works.
   const [flashId, setFlashId] = useState<number | null>(null);
   const flashedForRef = useRef<number | null>(null);
 
+  // A16: only the selected series' books are offered in the state form.
+  const seriesProjects = projects.filter((p) => p.seriesId === seriesId);
+
   const load = useCallback(async () => {
-    const res = await fetch("/api/characters");
+    const q = seriesId === null ? "" : `?seriesId=${seriesId}`;
+    const res = await fetch(`/api/characters${q}`);
     const data = await res.json();
     setCharacters(data.characters ?? []);
-  }, []);
+  }, [seriesId]);
 
   useEffect(() => {
     load();
@@ -76,15 +94,38 @@ export function CharactersManager({
 
   return (
     <div>
-      <button
-        onClick={() => setAdding((a) => !a)}
-        className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-sm text-accent-ink"
-      >
-        {adding ? "Close" : "+ New character"}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        {series.length > 0 && (
+          <label className="flex items-center gap-2 text-sm text-muted">
+            Series
+            <select
+              aria-label="Series"
+              data-testid="series-switcher"
+              value={seriesId ?? ""}
+              onChange={(e) =>
+                setSeriesId(e.target.value ? Number(e.target.value) : null)
+              }
+              className="rounded border border-edge px-2 py-1 text-sm text-ink"
+            >
+              {series.map((s) => (
+                <option key={s.id} value={String(s.id)}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <button
+          onClick={() => setAdding((a) => !a)}
+          className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-sm text-accent-ink"
+        >
+          {adding ? "Close" : "+ New character"}
+        </button>
+      </div>
 
       {adding && (
         <NewCharacterForm
+          seriesId={seriesId}
           onCreated={() => {
             setAdding(false);
             load();
@@ -102,7 +143,7 @@ export function CharactersManager({
           <CharacterCard
             key={c.id}
             character={c}
-            projects={projects}
+            projects={seriesProjects}
             onChanged={load}
             flash={flashId === c.id}
           />
@@ -148,7 +189,13 @@ function Field({
   );
 }
 
-function NewCharacterForm({ onCreated }: { onCreated: () => void }) {
+function NewCharacterForm({
+  seriesId,
+  onCreated,
+}: {
+  seriesId: number | null;
+  onCreated: () => void;
+}) {
   const [name, setName] = useState("");
   const [role, setRole] = useState("");
   const [voiceRules, setVoiceRules] = useState("");
@@ -163,7 +210,15 @@ function NewCharacterForm({ onCreated }: { onCreated: () => void }) {
     await fetch("/api/characters", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, role, voiceRules, physical, notes }),
+      // A16: the character is created in the currently selected series.
+      body: JSON.stringify({
+        name,
+        role,
+        voiceRules,
+        physical,
+        notes,
+        ...(seriesId !== null ? { seriesId } : {}),
+      }),
     });
     setBusy(false);
     onCreated();

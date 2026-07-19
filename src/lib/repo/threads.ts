@@ -1,8 +1,32 @@
 import { and, asc, eq, isNull, or, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
+import { getProject } from "./projects";
 
 type Db = BetterSQLite3Database<typeof schema>;
+
+// A16: resolve the series a thread belongs to. A book thread inherits its book's
+// series; a series-wide thread names its series explicitly, else defaults to the
+// first series (the repo default; the MCP tool layer is stricter).
+function resolveThreadSeriesId(
+  db: Db,
+  args: { projectId?: number | null; seriesId?: number | null },
+): number | null {
+  if (typeof args.seriesId === "number") return args.seriesId;
+  if (typeof args.projectId === "number") {
+    return getProject(db, args.projectId)?.seriesId ?? firstSeriesIdLocal(db);
+  }
+  return firstSeriesIdLocal(db);
+}
+
+function firstSeriesIdLocal(db: Db): number | null {
+  const row = db
+    .select({ id: schema.series.id })
+    .from(schema.series)
+    .orderBy(schema.series.orderIndex, schema.series.id)
+    .get();
+  return row ? row.id : null;
+}
 
 // Amendment A12: story threads. A thread is a standing narrative line; a touch is
 // one chapter's contact with it. project_id NULL means series-wide, like canon.
@@ -41,8 +65,9 @@ export function isTouchKind(v: unknown): v is TouchKind {
 
 export interface ThreadFilter {
   // A book id. When set, the result includes that book's threads AND series-wide
-  // (project_id NULL) threads, so a book view sees the threads it must keep warm.
-  // Omit to list every thread.
+  // (project_id NULL) threads OF THAT BOOK'S SERIES (A16), so a book view sees the
+  // threads it must keep warm and never another series' series-wide threads. Omit
+  // to list every thread.
   projectId?: number;
   status?: ThreadStatus;
 }
@@ -50,10 +75,17 @@ export interface ThreadFilter {
 export function listThreads(db: Db, filter: ThreadFilter = {}): Thread[] {
   const conds: SQL[] = [];
   if (typeof filter.projectId === "number") {
+    const seriesId = getProject(db, filter.projectId)?.seriesId ?? null;
+    // This book's own threads, plus series-wide threads of this book's series.
     conds.push(
       or(
-        isNull(schema.threads.projectId),
         eq(schema.threads.projectId, filter.projectId),
+        and(
+          isNull(schema.threads.projectId),
+          seriesId === null
+            ? isNull(schema.threads.seriesId)
+            : eq(schema.threads.seriesId, seriesId),
+        ),
       )!,
     );
   }
@@ -77,6 +109,10 @@ export function getThread(db: Db, id: number): Thread | undefined {
 
 export interface CreateThreadInput {
   projectId?: number | null;
+  // A16: the owning series. Inferred from projectId for a book thread; defaults to
+  // the first series for a series-wide thread when omitted (the MCP tool layer is
+  // stricter and rejects omitting both).
+  seriesId?: number | null;
   name: string;
   type: ThreadType;
   status?: ThreadStatus;
@@ -90,6 +126,10 @@ export function createThread(db: Db, input: CreateThreadInput): Thread {
     .insert(schema.threads)
     .values({
       projectId: input.projectId ?? null,
+      seriesId: resolveThreadSeriesId(db, {
+        projectId: input.projectId,
+        seriesId: input.seriesId,
+      }),
       name: input.name,
       type: input.type,
       status: input.status ?? "open",

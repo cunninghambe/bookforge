@@ -1,8 +1,33 @@
 import { and, desc, eq, inArray, isNull, type SQL } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
+import { getProject } from "./projects";
 
 type Db = BetterSQLite3Database<typeof schema>;
+
+// A16: resolve the series a canon fact belongs to. A book fact inherits its
+// book's series; a series-wide fact names its series explicitly, else defaults to
+// the first series (the API's documented default when a caller omits it). Kept
+// local to avoid importing the series repo (which imports this module).
+function resolveSeriesId(
+  db: Db,
+  args: { projectId?: number | null; seriesId?: number | null },
+): number | null {
+  if (typeof args.seriesId === "number") return args.seriesId;
+  if (typeof args.projectId === "number") {
+    return getProject(db, args.projectId)?.seriesId ?? firstSeriesIdLocal(db);
+  }
+  return firstSeriesIdLocal(db);
+}
+
+function firstSeriesIdLocal(db: Db): number | null {
+  const row = db
+    .select({ id: schema.series.id })
+    .from(schema.series)
+    .orderBy(schema.series.orderIndex, schema.series.id)
+    .get();
+  return row ? row.id : null;
+}
 
 export const CANON_TYPES = [
   "world_rule",
@@ -23,12 +48,19 @@ export interface CanonFilter {
   status?: CanonStatus;
   // scope: "series" = project_id NULL, a number = that book, undefined = all.
   scope?: "series" | number;
+  // A16: narrow to one series (across scopes). Omit to list across all series
+  // (the default global browse). Combines with scope: scope "series" + seriesId
+  // is that series' series-wide facts.
+  seriesId?: number;
 }
 
 export function listCanon(db: Db, filter: CanonFilter = {}): CanonFact[] {
   const conds: SQL[] = [];
   if (filter.type) conds.push(eq(schema.canonFacts.type, filter.type));
   if (filter.status) conds.push(eq(schema.canonFacts.status, filter.status));
+  if (typeof filter.seriesId === "number") {
+    conds.push(eq(schema.canonFacts.seriesId, filter.seriesId));
+  }
   if (filter.scope === "series") {
     conds.push(isNull(schema.canonFacts.projectId));
   } else if (typeof filter.scope === "number") {
@@ -53,6 +85,10 @@ export function getCanon(db: Db, id: number): CanonFact | undefined {
 
 export interface CreateCanonInput {
   projectId?: number | null;
+  // A16: the owning series. Inferred from projectId when omitted (a book fact),
+  // else defaults to the first series (a series-wide fact with no explicit
+  // series). The MCP tool layer is stricter and rejects omitting both.
+  seriesId?: number | null;
   type: CanonType;
   content: string;
   status?: CanonStatus;
@@ -64,6 +100,10 @@ export function createCanon(db: Db, input: CreateCanonInput): CanonFact {
     .insert(schema.canonFacts)
     .values({
       projectId: input.projectId ?? null,
+      seriesId: resolveSeriesId(db, {
+        projectId: input.projectId,
+        seriesId: input.seriesId,
+      }),
       type: input.type,
       content: input.content,
       status: input.status ?? "provisional",
@@ -107,7 +147,12 @@ export function deleteCanon(db: Db, id: number): void {
 // Bulk paste: one fact per line, created provisional. Blank lines are skipped.
 export function bulkCreateCanon(
   db: Db,
-  args: { lines: string; type: CanonType; projectId?: number | null },
+  args: {
+    lines: string;
+    type: CanonType;
+    projectId?: number | null;
+    seriesId?: number | null;
+  },
 ): CanonFact[] {
   const created: CanonFact[] = [];
   const lines = args.lines
@@ -118,6 +163,7 @@ export function bulkCreateCanon(
     created.push(
       createCanon(db, {
         projectId: args.projectId ?? null,
+        seriesId: args.seriesId ?? null,
         type: args.type,
         content,
         status: "provisional",
@@ -129,11 +175,14 @@ export function bulkCreateCanon(
 }
 
 // Facts that are eligible for prompt assembly: locked and not retired, in scope.
-// Used later by the context assembler; defined here to keep canon logic together.
+// A16: "in scope" is this book, plus series-wide (project_id NULL) facts of THIS
+// book's series, never another series' series-wide facts. Defined here to keep
+// canon logic together; used by the context assembler, chat, sweep, extraction.
 export function assemblableCanon(
   db: Db,
   args: { projectId: number; types?: CanonType[] },
 ): CanonFact[] {
+  const seriesId = getProject(db, args.projectId)?.seriesId ?? null;
   const conds: SQL[] = [eq(schema.canonFacts.status, "locked")];
   if (args.types && args.types.length > 0) {
     conds.push(inArray(schema.canonFacts.type, args.types));
@@ -144,8 +193,9 @@ export function assemblableCanon(
     .where(and(...conds))
     .orderBy(schema.canonFacts.id)
     .all();
-  // In scope = series-wide (null) or this book.
   return rows.filter(
-    (r) => r.projectId === null || r.projectId === args.projectId,
+    (r) =>
+      r.projectId === args.projectId ||
+      (r.projectId === null && r.seriesId === seriesId),
   );
 }

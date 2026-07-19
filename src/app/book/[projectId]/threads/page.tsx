@@ -34,6 +34,7 @@ export default async function ThreadsPage({
       </p>
       <ThreadsManager
         projectId={project.id}
+        seriesId={project.seriesId ?? null}
         highlightId={Number.isFinite(highlightId) ? highlightId : null}
       />
     </main>

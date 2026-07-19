@@ -25,8 +25,8 @@ const DATA_DIR = resolve(ROOT, "data");
 const DB_PATH = resolve(DATA_DIR, `mcp-test-${process.pid}-${Date.now()}.db`);
 const SERVER = resolve(ROOT, "src", "mcp", "server.ts");
 
-// Every tool the SPEC A6 list registers, plus the A11 search tool and the A12
-// thread tools.
+// Every tool the SPEC A6 list registers, plus the A11 search tool, the A12
+// thread tools, and the A16 series/book tools.
 const EXPECTED_TOOLS = [
   "search",
   "canon_list",
@@ -53,6 +53,10 @@ const EXPECTED_TOOLS = [
   "thread_touch_add",
   "thread_resolve",
   "thread_retire",
+  "series_list",
+  "series_create",
+  "book_create",
+  "book_rename",
 ];
 
 let client: Client;

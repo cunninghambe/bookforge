@@ -40,18 +40,21 @@ export interface BibleImportResult {
 
 export async function runBibleImport(
   db: Db,
-  args: { text: string; fixtureKey?: string },
+  args: { text: string; fixtureKey?: string; seriesId?: number },
 ): Promise<BibleImportResult> {
   const chunks = chunkBible(args.text);
   const client = getLlmClient();
   const model = modelFor(db, "bible");
 
   // Context shared by every chunk so the model avoids duplicate proposals: the
-  // current locked canon and the tracked character names.
-  const currentCanon = listCanon(db, { status: "locked" }).map(
-    (f) => `[${f.type}] ${f.content}`,
-  );
-  const knownCharacters = listCharacters(db).map((c) => c.name);
+  // current locked canon and the tracked character names. A16: scoped to the
+  // target series when known, so a multi-series database does not seed the model
+  // with another series' canon or roster.
+  const currentCanon = listCanon(db, {
+    status: "locked",
+    seriesId: args.seriesId,
+  }).map((f) => `[${f.type}] ${f.content}`);
+  const knownCharacters = listCharacters(db, args.seriesId).map((c) => c.name);
 
   const facts: BibleFactProposal[] = [];
   const characters: BibleCharacterProposal[] = [];

@@ -1,13 +1,27 @@
 import Link from "next/link";
 import { getDb } from "@/lib/db";
-import { listProjects } from "@/lib/repo/projects";
+import { listProjectsBySeries } from "@/lib/repo/projects";
+import { listSeries } from "@/lib/repo/series";
 import { TopNav } from "@/components/TopNav";
+import { BooksManager } from "@/components/BooksManager";
 
 export const dynamic = "force-dynamic";
 
+// A16: the home Books page groups books under series headings, with calm
+// creation (new book, new series) and rename flows. The grouped data is assembled
+// server-side and handed to the client manager, which re-renders this page after
+// each mutation via router.refresh().
 export default function HomePage() {
   const db = getDb();
-  const projects = listProjects(db);
+  const series = listSeries(db).map((s) => ({
+    id: s.id,
+    title: s.title,
+    books: listProjectsBySeries(db, s.id).map((p) => ({
+      id: p.id,
+      title: p.title,
+    })),
+  }));
+
   return (
     <main>
       <TopNav active="books" />
@@ -21,18 +35,7 @@ export default function HomePage() {
           Import series bible
         </Link>
       </div>
-      <ul className="mt-4 space-y-2" data-testid="book-list">
-        {projects.map((p) => (
-          <li key={p.id}>
-            <Link
-              href={`/book/${p.id}`}
-              className="text-lg hover:underline"
-            >
-              {p.title}
-            </Link>
-          </li>
-        ))}
-      </ul>
+      <BooksManager series={series} />
     </main>
   );
 }

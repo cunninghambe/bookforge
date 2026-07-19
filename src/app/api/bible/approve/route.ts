@@ -93,7 +93,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "nothing approved" }, { status: 400 });
   }
 
-  const result = approveBible(db, { scope, facts, characters, states });
+  // A16: a series-wide import may name its target series; approveBible defaults
+  // to the first series when omitted. A book scope derives its series from the
+  // book and ignores this.
+  const seriesId =
+    typeof body.seriesId === "number" ? body.seriesId : undefined;
+  const result = approveBible(db, { scope, seriesId, facts, characters, states });
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error, unmatched: result.unmatched },

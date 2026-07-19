@@ -7,12 +7,28 @@ type Db = BetterSQLite3Database<typeof schema>;
 export type Character = typeof schema.characters.$inferSelect;
 export type CharacterState = typeof schema.characterStates.$inferSelect;
 
-export function listCharacters(db: Db): Character[] {
-  return db
-    .select()
-    .from(schema.characters)
-    .orderBy(asc(schema.characters.name))
-    .all();
+// A16: the first series' id, the documented default owner for a character created
+// without an explicit series (the API defaults; the UI switcher always names one).
+function firstSeriesIdLocal(db: Db): number | null {
+  const row = db
+    .select({ id: schema.series.id })
+    .from(schema.series)
+    .orderBy(schema.series.orderIndex, schema.series.id)
+    .get();
+  return row ? row.id : null;
+}
+
+// A16: list characters, optionally scoped to one series. Omit seriesId to list
+// every character across all series (kept for the rare global need); pass a
+// seriesId to get exactly that series' roster (assembler, chat, extraction, the
+// characters page switcher). A character belongs to exactly one series.
+export function listCharacters(db: Db, seriesId?: number): Character[] {
+  const q = db.select().from(schema.characters);
+  const rows =
+    typeof seriesId === "number"
+      ? q.where(eq(schema.characters.seriesId, seriesId))
+      : q;
+  return rows.orderBy(asc(schema.characters.name)).all();
 }
 
 export function getCharacter(db: Db, id: number): Character | undefined {
@@ -25,6 +41,10 @@ export function getCharacter(db: Db, id: number): Character | undefined {
 
 export interface CharacterInput {
   name: string;
+  // A16: the owning series. Defaults to the first series when omitted (the API's
+  // documented default so pre-A16 create calls keep working); the UI always names
+  // one via the series switcher.
+  seriesId?: number | null;
   role?: string | null;
   voiceRules?: string | null;
   physical?: string | null;
@@ -35,6 +55,10 @@ export function createCharacter(db: Db, input: CharacterInput): Character {
   return db
     .insert(schema.characters)
     .values({
+      seriesId:
+        typeof input.seriesId === "number"
+          ? input.seriesId
+          : firstSeriesIdLocal(db),
       name: input.name,
       role: input.role ?? null,
       voiceRules: input.voiceRules ?? null,
@@ -114,14 +138,17 @@ export function addState(db: Db, input: StateInput): CharacterState {
 }
 
 // Finds a character by exact name, case-insensitive. Used to resolve extraction
-// state proposals to an existing character before approval (Amendment A1).
+// state proposals to an existing character before approval (Amendment A1). A16:
+// pass a seriesId to resolve within one series only, so a same-named character in
+// another series never matches.
 export function findCharacterByName(
   db: Db,
   name: string,
+  seriesId?: number,
 ): Character | undefined {
   const target = name.trim().toLowerCase();
   if (!target) return undefined;
-  return listCharacters(db).find(
+  return listCharacters(db, seriesId).find(
     (c) => c.name.trim().toLowerCase() === target,
   );
 }

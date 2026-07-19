@@ -7,6 +7,13 @@ export function migrate(sqlite: Database.Database): void {
   sqlite.pragma("foreign_keys = ON");
 
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS series (
+      id INTEGER PRIMARY KEY,
+      title TEXT NOT NULL,
+      order_index INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS projects (
       id INTEGER PRIMARY KEY,
       title TEXT NOT NULL,
@@ -168,16 +175,40 @@ export function migrate(sqlite: Database.Database): void {
     definition: "TEXT",
   });
 
+  // Amendment A16: series_id on the four tables that were implicitly series-wide.
+  // Added without a REFERENCES clause so the ALTER never has to validate existing
+  // rows; NOT NULL semantics are enforced in code and by the backfill below.
+  for (const table of ["projects", "canon_facts", "characters", "threads"]) {
+    addColumnIfMissing(sqlite, { table, column: "series_id", definition: "INTEGER" });
+  }
+  // Assign every pre-A16 row to a single editable "The Trilogy" series so an
+  // existing chapter's assembled prompt is byte-identical after migration.
+  backfillSeries(sqlite);
+
   // Amendment A11: the full-text search index. The virtual table and its
   // triggers are (re)created every migrate (DROP TRIGGER IF EXISTS keeps the
   // trigger bodies current across upgrades), then the whole index is rebuilt:
   // O(project size), trivially cheap for a single user, and it both indexes
   // pre-A11 databases on first run and self-heals any drift. See D103.
+  // A16: the index gains an unindexed series_id column. A pre-A16 search_index
+  // (created without that column) is dropped so it is recreated with the current
+  // schema; the whole index is rebuilt from source below every migrate anyway, so
+  // dropping loses nothing. sqlite_master's stored SQL is the reliable probe for a
+  // virtual table's declared columns.
+  const existing = sqlite
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='search_index'",
+    )
+    .get() as { sql: string } | undefined;
+  if (existing && !/series_id/.test(existing.sql)) {
+    sqlite.exec("DROP TABLE search_index;");
+  }
   sqlite.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
       kind UNINDEXED,
       ref_id UNINDEXED,
       project_id UNINDEXED,
+      series_id UNINDEXED,
       meta UNINDEXED,
       title,
       body,
@@ -186,6 +217,45 @@ export function migrate(sqlite: Database.Database): void {
   `);
   sqlite.exec(searchTriggerSql());
   rebuildSearchIndex(sqlite);
+}
+
+// ---- Amendment A16: series backfill -----------------------------------------
+
+// Get-or-create the default series. Returns the id of the lowest-ordered series,
+// creating "The Trilogy" (order_index 0) when the table is empty. Shared by the
+// migration backfill and the fresh-database seed so both land on one series 1.
+function ensureDefaultSeries(sqlite: Database.Database): number {
+  const existing = sqlite
+    .prepare("SELECT id FROM series ORDER BY order_index, id LIMIT 1")
+    .get() as { id: number } | undefined;
+  if (existing) return existing.id;
+  const info = sqlite
+    .prepare("INSERT INTO series (title, order_index) VALUES (?, 0)")
+    .run(DEFAULT_SERIES_TITLE);
+  return Number(info.lastInsertRowid);
+}
+
+// Assigns every project, canon fact, character, and thread with a NULL series_id
+// to a single default series. Idempotent: after the first run there are no NULL
+// rows, so re-running (and running on a fresh, empty database, where seed() makes
+// the series instead) is a no-op that never creates a spurious series.
+function backfillSeries(sqlite: Database.Database): void {
+  const orphans = sqlite
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM projects WHERE series_id IS NULL) +
+         (SELECT COUNT(*) FROM canon_facts WHERE series_id IS NULL) +
+         (SELECT COUNT(*) FROM characters WHERE series_id IS NULL) +
+         (SELECT COUNT(*) FROM threads WHERE series_id IS NULL) AS n`,
+    )
+    .get() as { n: number };
+  if (orphans.n === 0) return;
+  const seriesId = ensureDefaultSeries(sqlite);
+  for (const table of ["projects", "canon_facts", "characters", "threads"]) {
+    sqlite
+      .prepare(`UPDATE ${table} SET series_id = ? WHERE series_id IS NULL`)
+      .run(seriesId);
+  }
 }
 
 // ---- Amendment A11: search index maintenance -------------------------------
@@ -198,8 +268,9 @@ export function migrate(sqlite: Database.Database): void {
 // the tokenizer discards the punctuation), and the LATEST draft's prose.
 function searchInsertChapters(where: string): string {
   return `
-    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    INSERT INTO search_index (kind, ref_id, project_id, series_id, meta, title, body)
     SELECT 'chapter', c.id, c.project_id,
+           (SELECT series_id FROM projects WHERE id = c.project_id),
            json_object('orderIndex', c.order_index, 'status', c.status, 'pov', c.pov),
            COALESCE(c.title, ''),
            COALESCE(c.pov, '') || ' ' || COALESCE(c.synopsis, '') || ' ' ||
@@ -212,8 +283,8 @@ function searchInsertChapters(where: string): string {
 
 function searchInsertCanon(where: string): string {
   return `
-    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
-    SELECT 'canon', f.id, f.project_id,
+    INSERT INTO search_index (kind, ref_id, project_id, series_id, meta, title, body)
+    SELECT 'canon', f.id, f.project_id, f.series_id,
            json_object('type', f.type, 'status', f.status),
            '',
            f.content
@@ -222,8 +293,8 @@ function searchInsertCanon(where: string): string {
 
 function searchInsertCharacters(where: string): string {
   return `
-    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
-    SELECT 'character', ch.id, NULL,
+    INSERT INTO search_index (kind, ref_id, project_id, series_id, meta, title, body)
+    SELECT 'character', ch.id, NULL, ch.series_id,
            json_object('role', ch.role),
            ch.name,
            COALESCE(ch.role, '') || ' ' || COALESCE(ch.voice_rules, '') || ' ' ||
@@ -234,8 +305,9 @@ function searchInsertCharacters(where: string): string {
 // State rows carry the owning character's name as their searchable title.
 function searchInsertStates(where: string): string {
   return `
-    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
+    INSERT INTO search_index (kind, ref_id, project_id, series_id, meta, title, body)
     SELECT 'state', s.id, s.project_id,
+           (SELECT series_id FROM projects WHERE id = s.project_id),
            json_object('characterId', s.character_id, 'chapterOrder', s.chapter_order),
            COALESCE((SELECT name FROM characters WHERE id = s.character_id), ''),
            COALESCE(s.knows, '') || ' ' || COALESCE(s.feels, '') || ' ' ||
@@ -249,8 +321,8 @@ function searchInsertStates(where: string): string {
 // project_id (NULL for series-wide); the query layer resolves the deep link.
 function searchInsertThreads(where: string): string {
   return `
-    INSERT INTO search_index (kind, ref_id, project_id, meta, title, body)
-    SELECT 'thread', t.id, t.project_id,
+    INSERT INTO search_index (kind, ref_id, project_id, series_id, meta, title, body)
+    SELECT 'thread', t.id, t.project_id, t.series_id,
            json_object('type', t.type, 'status', t.status, 'projectId', t.project_id),
            t.name,
            t.type || ' ' || t.status || ' ' || COALESCE(t.note, '') || ' ' ||
@@ -429,31 +501,38 @@ const SEED_STYLE_RULES: string[] = [
 
 const SEED_PROJECTS: string[] = ["Book 1", "Book 2", "Book 3"];
 
+// A16: the editable title of the series the trilogy is backfilled into and the
+// one a fresh database seeds.
+const DEFAULT_SERIES_TITLE = "The Trilogy";
+
 // Idempotent seed. Only inserts when the target rows are absent, so re-running is
-// safe. Books are created once; seed style rules are created once (matched by
-// exact content + source 'seed').
+// safe. The default series is created once; books are created once, assigned to
+// it; seed style rules are created once (matched by exact content + source
+// 'seed'), series-wide within that series (project_id NULL, series_id set).
 export function seed(sqlite: Database.Database): void {
+  const seriesId = ensureDefaultSeries(sqlite);
+
   const projectCount = sqlite
     .prepare("SELECT COUNT(*) AS n FROM projects")
     .get() as { n: number };
 
   if (projectCount.n === 0) {
     const insertProject = sqlite.prepare(
-      "INSERT INTO projects (title, order_index) VALUES (?, ?)",
+      "INSERT INTO projects (title, order_index, series_id) VALUES (?, ?, ?)",
     );
-    SEED_PROJECTS.forEach((title, i) => insertProject.run(title, i));
+    SEED_PROJECTS.forEach((title, i) => insertProject.run(title, i, seriesId));
   }
 
   const findSeed = sqlite.prepare(
     "SELECT id FROM canon_facts WHERE content = ? AND source = 'seed'",
   );
   const insertFact = sqlite.prepare(
-    `INSERT INTO canon_facts (project_id, type, content, status, source)
-     VALUES (NULL, 'style_rule', ?, 'locked', 'seed')`,
+    `INSERT INTO canon_facts (project_id, series_id, type, content, status, source)
+     VALUES (NULL, ?, 'style_rule', ?, 'locked', 'seed')`,
   );
   for (const content of SEED_STYLE_RULES) {
     const existing = findSeed.get(content);
-    if (!existing) insertFact.run(content);
+    if (!existing) insertFact.run(seriesId, content);
   }
 }
 
@@ -462,4 +541,4 @@ export function migrateAndSeed(sqlite: Database.Database): void {
   seed(sqlite);
 }
 
-export { SEED_STYLE_RULES, SEED_PROJECTS };
+export { SEED_STYLE_RULES, SEED_PROJECTS, DEFAULT_SERIES_TITLE };

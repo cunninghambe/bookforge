@@ -24,6 +24,11 @@ interface Fact {
 interface Project {
   id: number;
   title: string;
+  seriesId: number | null;
+}
+interface SeriesOpt {
+  id: number;
+  title: string;
 }
 
 const TYPE_LABEL: Record<CanonType, string> = {
@@ -35,17 +40,28 @@ const TYPE_LABEL: Record<CanonType, string> = {
 };
 
 export function CanonManager({
+  series,
   projects,
+  initialSeriesId,
   highlightId,
 }: {
+  series: SeriesOpt[];
   projects: Project[];
+  initialSeriesId?: number | null;
   highlightId?: number | null;
 }) {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterScope, setFilterScope] = useState<string>("all");
+  // A16: the canon list is scoped to one series via a calm switcher, defaulting
+  // to the first series (or the highlighted fact's series on a deep link).
+  const [seriesId, setSeriesId] = useState<number | null>(
+    initialSeriesId ?? series[0]?.id ?? null,
+  );
   const [loading, setLoading] = useState(true);
+  // Only the selected series' books are offered in the scope selectors.
+  const seriesProjects = projects.filter((p) => p.seriesId === seriesId);
   // A11: ?highlight=<id> scrolls to that fact and flashes it briefly (D107).
   // flashedForRef remembers which id was already flashed so re-renders do not
   // re-flash, while a later deep-link to a different fact still works.
@@ -64,12 +80,13 @@ export function CanonManager({
     if (filterType !== "all") params.set("type", filterType);
     if (filterStatus !== "all") params.set("status", filterStatus);
     if (filterScope !== "all") params.set("scope", filterScope);
+    if (seriesId !== null) params.set("seriesId", String(seriesId));
     const res = await fetch(`/api/canon?${params.toString()}`);
     const data = await res.json();
     if (requestIdRef.current !== requestId) return;
     setFacts(data.facts ?? []);
     setLoading(false);
-  }, [filterType, filterStatus, filterScope]);
+  }, [filterType, filterStatus, filterScope, seriesId]);
 
   useEffect(() => {
     load();
@@ -100,8 +117,31 @@ export function CanonManager({
 
   return (
     <div>
+      {series.length > 0 && (
+        <label className="mb-3 flex items-center gap-2 text-sm text-muted">
+          Series
+          <select
+            aria-label="Series"
+            data-testid="canon-series-switcher"
+            value={seriesId ?? ""}
+            onChange={(e) => {
+              setSeriesId(e.target.value ? Number(e.target.value) : null);
+              // A book scope from another series is no longer valid; reset it.
+              setFilterScope("all");
+            }}
+            className="rounded border border-edge px-2 py-1 text-sm text-ink"
+          >
+            {series.map((s) => (
+              <option key={s.id} value={String(s.id)}>
+                {s.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <FilterBar
-        projects={projects}
+        projects={seriesProjects}
         filterType={filterType}
         filterStatus={filterStatus}
         filterScope={filterScope}
@@ -110,7 +150,7 @@ export function CanonManager({
         onScope={setFilterScope}
       />
 
-      <AddForm projects={projects} onCreated={load} />
+      <AddForm projects={seriesProjects} seriesId={seriesId} onCreated={load} />
 
       <ul className="mt-4 divide-y divide-edge-soft" data-testid="canon-list">
         {loading && <li className="py-3 text-sm text-faint">Loading...</li>}
@@ -130,7 +170,7 @@ export function CanonManager({
         ))}
       </ul>
 
-      <BulkPaste projects={projects} onCreated={load} />
+      <BulkPaste projects={seriesProjects} seriesId={seriesId} onCreated={load} />
     </div>
   );
 }
@@ -201,9 +241,11 @@ function FilterBar(props: {
 
 function AddForm({
   projects,
+  seriesId,
   onCreated,
 }: {
   projects: Project[];
+  seriesId: number | null;
   onCreated: () => void;
 }) {
   const [type, setType] = useState<CanonType>("world_rule");
@@ -218,11 +260,13 @@ function AddForm({
     await fetch("/api/canon", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // A16: a series-wide fact is created in the selected series.
       body: JSON.stringify({
         type,
         content: content.trim(),
         status: "provisional",
         projectId: scope === "series" ? null : Number(scope),
+        ...(scope === "series" && seriesId !== null ? { seriesId } : {}),
       }),
     });
     setBusy(false);
@@ -423,9 +467,11 @@ function CanonRow({
 
 function BulkPaste({
   projects,
+  seriesId,
   onCreated,
 }: {
   projects: Project[];
+  seriesId: number | null;
   onCreated: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -440,11 +486,13 @@ function BulkPaste({
     await fetch("/api/canon", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // A16: bulk series-wide facts are created in the selected series.
       body: JSON.stringify({
         bulk: true,
         lines: text,
         type,
         projectId: scope === "series" ? null : Number(scope),
+        ...(scope === "series" && seriesId !== null ? { seriesId } : {}),
       }),
     });
     setBusy(false);

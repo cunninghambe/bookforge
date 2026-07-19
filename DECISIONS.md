@@ -1734,6 +1734,121 @@ and the root-level `workers: 1`, so the two projects still run strictly
 serially in one worker, preserving the pre-A15 non-flaky execution model
 rather than introducing project-level parallelism.
 
+## Amendment A16: multiple series and creating books
+
+### D140: series_id added by guarded ALTER plus a self-healing backfill, never a NOT NULL column
+
+The four tables that were implicitly series-wide (`projects`, `canon_facts`,
+`characters`, `threads`) gain `series_id` through the existing
+`addColumnIfMissing` pattern, added as a plain nullable INTEGER with no
+REFERENCES clause so the ALTER never has to validate existing rows. NOT NULL is
+enforced in code, not in the schema. A `backfillSeries` step runs on every
+migrate: if any of the four tables has a NULL `series_id`, it get-or-creates one
+default series ("The Trilogy", editable) and assigns every orphan to it. The
+orphan check means the backfill is a no-op on an already-migrated database and
+on a truly empty one (where `seed()` makes the series instead), so it never
+creates a spurious second series. This is what makes the acceptance keystone
+hold: on a database carrying the trilogy, everything lands under one series and
+an existing chapter's assembled prompt is byte-identical before and after.
+
+### D141: repos default an omitted series to the first series; the MCP tools are strict
+
+`createCanon`, `createThread`, and `createCharacter` resolve `series_id` from the
+`projectId` when one is given (a book item inherits its book's series) and fall
+back to the first series when a series-wide item names no series. This keeps
+every pre-A16 internal caller and existing test working unchanged (a repo call
+with `projectId: null` still succeeds). The MCP `canon_add` and `thread_create`
+handlers are the strict layer: omitting BOTH `projectId` and `seriesId` throws
+"a series-wide item must name its series", per SPEC. The one existing tool test
+that created a series-wide fact with neither was adapted to pass `seriesId: 1`
+(its status/source/lock assertions are unchanged, so nothing is weakened) and a
+new test covers the rejection.
+
+### D142: project order_index is scoped within a series, not global
+
+`createProject` computes the next `order_index` as the max among that series'
+books plus one, so a new series' first book is order 0 exactly like the trilogy's
+Book 1, and reading order is per-series. This is load-bearing for prompt
+isolation: `buildStorySoFar` now filters "prior books" to earlier books OF THE
+SAME SERIES, so a new series' book never lists the trilogy's books as prior
+context even though their order_index values overlap. The home page groups by
+series and orders books within a series by this index, so global order_index
+uniqueness was never needed.
+
+### D143: assemblableCanon is the single canon-scoping seam; everything flows through it
+
+Rather than re-implement series scoping in each consumer, `assemblableCanon`
+resolves the book's series once and returns "this book, plus series-wide facts of
+this book's series". The assembler, character chat, sweep, lock-time extraction,
+and interrogation all call it, so all five inherit the boundary from one change.
+Each still gets its own cross-series isolation test (assembler prompt, chat
+context, sweep prefix capture, and the listThreads/listCharacters queries that
+feed extraction), because sharing an implementation is not the same as proving
+each surface honors it.
+
+### D144: characters carry a series_id; listCharacters gains an optional series filter, defaulting to global
+
+`listCharacters(db, seriesId?)` returns one series' roster when a series is named
+and every character across all series when it is not. The assembler, extraction,
+review @-mentions, the characters page, and the threads relationship picker pass
+the book's or switcher's series; `GET /api/characters` returns all characters
+when no `seriesId` query param is present (so pre-A16 global callers, including
+existing e2e setup, keep working) and one series' roster when it is. `POST
+/api/characters` defaults an omitted `seriesId` to the first series, documented
+so the A3 and other specs that create a character with only a name still land it
+in the trilogy.
+
+### D145: the FTS index gains an unindexed series_id, self-heals its schema, and stays globally searchable by default
+
+`search_index` gains a `series_id UNINDEXED` column populated by the triggers and
+the rebuild (derived from the project for chapters and states, carried directly
+for canon, characters, and threads). A pre-A16 index built without that column is
+detected by probing `sqlite_master.sql` and dropped so it is recreated with the
+current schema, since migrate rebuilds it from source every run anyway. The bm25
+weight vector gained a leading 0 for the new column. Default palette search stays
+global across all series (finding things is the point); the API and MCP `search`
+gain an optional `seriesId` filter. A series-wide thread hit now deep-links to the
+first book of ITS series (`firstProjectOfSeries`), resolved from the hit's
+`seriesId`, falling back to the overall first book.
+
+### D146: creating a series copies the five seed style rules into it and lands a first book
+
+`createSeries` inserts the series, COPIES the five seed style rules as locked
+series-wide `style_rule` facts (source 'seed') owned by the new series, and
+creates a first book with a default editable title ("Book 1"), so the author
+lands ready to write. The copies are independent rows, so a series can retire or
+edit its own style contract without touching another series'. The em-dash
+prohibition remains repo law regardless of any per-series edit.
+
+### D147: four new MCP tools, and the tool-list tests extended exactly
+
+`series_list`, `series_create`, `book_create`, and `book_rename` join the surface;
+`characters_list` gains an optional `seriesId`. None match the human-only gate
+patterns (approve/resolve/revise/import/lock-chapter), so the absence assertions
+keep passing untouched in meaning. Both exact tool-list tests
+(`mcp-tools.test.ts` and `mcp-server.test.ts`) were extended by the four names,
+which is the required and expected way to keep those lists exact. `book_rename`
+does not move a book between series (there is no cross-series move), matching the
+SPEC non-goal.
+
+### D148: the canon page gains the same series switcher as the characters page; the bible importer resolves its scope's series
+
+The characters page's series switcher pattern (default first series, or the
+deep-linked row's series on a `?highlight=`) is applied identically to the canon
+page. This was not only for coherence: a global canon page would show every
+series' copied seed style rules mixed together, and the existing phase1 e2e
+asserts exactly five locked style rules, which only holds when the list is scoped
+to one series. Scoping the canon list to the switcher's series (series-wide facts
+of that series plus that series' book facts) keeps that assertion true no matter
+how many series exist, and a series-wide fact created from the page (or from
+`POST /api/canon`) lands in the selected series (`seriesId` in the body), falling
+back to the first series when none is named. The bible importer resolves its
+scope's series the same way: a book scope from the chosen book, a series-wide
+import to the first series (the documented default), which keeps the A3 e2e green
+because its Book 2 scope resolves to the trilogy exactly as before. Cross-series
+character sharing, per-series settings/theming, and deleting or archiving a
+series or book remain non-goals (removal stays a manual database operation).
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

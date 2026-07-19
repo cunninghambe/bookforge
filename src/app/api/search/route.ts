@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { listProjects } from "@/lib/repo/projects";
+import { listProjects, firstProjectOfSeries } from "@/lib/repo/projects";
 import {
   SEARCH_KINDS,
   searchIndex,
@@ -12,9 +12,13 @@ import {
 // session gate like every other /api route. Each hit gains the app URL the
 // palette navigates to; snippets keep the layer's marker characters (D106).
 
-// firstBookId is used to deep-link a series-wide thread hit (project_id null): it
-// lands on the first book's threads page (books are ordered by order_index).
-function urlFor(hit: SearchHit, firstBookId: number | null): string {
+// firstBookForSeriesWideThread deep-links a series-wide thread hit (project_id
+// null) to the first book of ITS series (A16), falling back to the overall first
+// book when the series has no book yet.
+function urlFor(
+  hit: SearchHit,
+  firstBookForSeriesWideThread: (hit: SearchHit) => number | null,
+): string {
   switch (hit.kind) {
     case "chapter":
       return `/book/${hit.projectId}/chapter/${hit.id}/draft`;
@@ -25,8 +29,9 @@ function urlFor(hit: SearchHit, firstBookId: number | null): string {
     case "state":
       return `/characters?highlight=${hit.characterId}`;
     case "thread": {
-      // A12: series-wide threads (projectId null) resolve to the first book.
-      const projectId = hit.projectId ?? firstBookId;
+      // A16: a series-wide thread (projectId null) resolves to the first book of
+      // its own series.
+      const projectId = hit.projectId ?? firstBookForSeriesWideThread(hit);
       return `/book/${projectId}/threads?highlight=${hit.id}`;
     }
   }
@@ -52,6 +57,12 @@ export async function GET(req: Request) {
       ? Number(projectIdRaw)
       : undefined;
 
+  const seriesIdRaw = url.searchParams.get("seriesId");
+  const seriesId =
+    seriesIdRaw !== null && Number.isFinite(Number(seriesIdRaw))
+      ? Number(seriesIdRaw)
+      : undefined;
+
   const limitRaw = url.searchParams.get("limit");
   const limit =
     limitRaw !== null && Number.isFinite(Number(limitRaw))
@@ -62,12 +73,21 @@ export async function GET(req: Request) {
     query: q,
     kinds,
     projectId,
+    seriesId,
     includeRetired: url.searchParams.get("includeRetired") === "1",
     limit,
   });
-  // A12: resolved once so a series-wide thread hit can link to the first book.
-  const firstBookId = listProjects(db)[0]?.id ?? null;
+  // A16: a series-wide thread hit links to the first book of its own series;
+  // fall back to the overall first book when the series has no book.
+  const overallFirstBookId = listProjects(db)[0]?.id ?? null;
+  const firstBookForSeriesWideThread = (h: SearchHit): number | null =>
+    (h.seriesId !== null
+      ? firstProjectOfSeries(db, h.seriesId)?.id ?? null
+      : null) ?? overallFirstBookId;
   return NextResponse.json({
-    results: hits.map((h) => ({ ...h, url: urlFor(h, firstBookId) })),
+    results: hits.map((h) => ({
+      ...h,
+      url: urlFor(h, firstBookForSeriesWideThread),
+    })),
   });
 }

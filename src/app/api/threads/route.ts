@@ -71,6 +71,9 @@ export async function POST(req: Request) {
 
   const thread = createThread(db, {
     projectId: typeof body.projectId === "number" ? body.projectId : null,
+    // A16: a book thread inherits its book's series; a series-wide thread may name
+    // its series, defaulting to the first series.
+    seriesId: typeof body.seriesId === "number" ? body.seriesId : null,
     name,
     type: body.type as ThreadType,
     status,

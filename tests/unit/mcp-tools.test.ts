@@ -53,7 +53,7 @@ function tool(name: string) {
 }
 
 describe("MCP tool surface", () => {
-  it("registers exactly the SPEC A6 tools plus A11 search and A12 threads", () => {
+  it("registers exactly the SPEC A6 tools plus A11 search, A12 threads, A16 series/books", () => {
     expect([...TOOL_NAMES].sort()).toEqual(
       [
         "search",
@@ -81,6 +81,10 @@ describe("MCP tool surface", () => {
         "thread_touch_add",
         "thread_resolve",
         "thread_retire",
+        "series_list",
+        "series_create",
+        "book_create",
+        "book_rename",
       ].sort(),
     );
   });
@@ -178,11 +182,20 @@ describe("1-based / 0-based boundary conversions", () => {
 describe("tool behavior and shaping", () => {
   it("canon_add records source 'mcp' and the given status; canon_lock flips it", async () => {
     const { ctx } = ctxFor();
+    // A16: a series-wide fact (no projectId) must name its series.
     const added = (await tool("canon_add").handler(ctx, {
       type: "world_rule",
       content: "Iron burns elementals.",
       status: "provisional",
-    })) as { fact: { id: number; status: string; source: string; projectId: number | null } };
+      seriesId: 1,
+    })) as {
+      fact: {
+        id: number;
+        status: string;
+        source: string;
+        projectId: number | null;
+      };
+    };
     expect(added.fact.status).toBe("provisional");
     expect(added.fact.source).toBe("mcp");
     expect(added.fact.projectId).toBe(null); // omitted projectId => series-wide
@@ -191,6 +204,29 @@ describe("tool behavior and shaping", () => {
       id: added.fact.id,
     })) as { fact: { status: string } };
     expect(locked.fact.status).toBe("locked");
+  });
+
+  it("canon_add rejects omitting both projectId and seriesId (A16)", async () => {
+    const { ctx } = ctxFor();
+    await expect(
+      (async () =>
+        tool("canon_add").handler(ctx, {
+          type: "world_rule",
+          content: "A series-wide fact with no series named.",
+          status: "provisional",
+        }))(),
+    ).rejects.toThrow(/must name its series/i);
+  });
+
+  it("canon_add infers the series from a book's projectId (A16)", async () => {
+    const { ctx } = ctxFor();
+    const added = (await tool("canon_add").handler(ctx, {
+      type: "world_rule",
+      content: "A book-scoped fact.",
+      status: "provisional",
+      projectId: 1,
+    })) as { fact: { projectId: number | null } };
+    expect(added.fact.projectId).toBe(1);
   });
 
   it("interrogate_chapter stores and returns questions and logs an llm_calls row", async () => {
@@ -299,6 +335,7 @@ describe("search tool (A11)", () => {
       type: "world_rule",
       content: "Vermilion ink is reserved for the crown.",
       status: "provisional",
+      seriesId: 1,
     })) as { fact: { id: number } };
     await tool("canon_retire").handler(ctx, { id: added.fact.id });
 
@@ -421,5 +458,87 @@ describe("thread tools (A12)", () => {
           kind: "advance",
         }))(),
     ).rejects.toThrow(/projectId is required/i);
+  });
+
+  it("thread_create rejects omitting both projectId and seriesId (A16)", async () => {
+    const { ctx } = ctxFor();
+    await expect(
+      (async () =>
+        tool("thread_create").handler(ctx, {
+          name: "Series-wide with no series",
+          type: "arc",
+        }))(),
+    ).rejects.toThrow(/must name its series/i);
+  });
+
+  it("thread_create infers the series from a book's projectId (A16)", async () => {
+    const { ctx } = ctxFor();
+    const created = (await tool("thread_create").handler(ctx, {
+      name: "Book thread",
+      type: "arc",
+      projectId: 1,
+    })) as { thread: { projectId: number | null } };
+    expect(created.thread.projectId).toBe(1);
+  });
+});
+
+describe("series and book tools (A16)", () => {
+  it("series_list returns the seeded series", async () => {
+    const { ctx } = ctxFor();
+    const out = (await tool("series_list").handler(ctx, {})) as {
+      series: Array<{ id: number; title: string }>;
+    };
+    expect(out.series.length).toBe(1);
+    expect(out.series[0].title).toBe("The Trilogy");
+  });
+
+  it("series_create copies the seed style rules and creates a first book", async () => {
+    const { ctx, db } = ctxFor();
+    const out = (await tool("series_create").handler(ctx, {
+      title: "Second World",
+    })) as {
+      series: { id: number; title: string };
+      firstBook: { id: number; seriesId: number | null; orderIndex: number };
+    };
+    expect(out.series.title).toBe("Second World");
+    expect(out.firstBook.seriesId).toBe(out.series.id);
+    expect(out.firstBook.orderIndex).toBe(0);
+
+    // The new series has exactly the five copied locked style rules, series-wide.
+    const rules = db
+      .select()
+      .from(schema.canonFacts)
+      .where(eq(schema.canonFacts.seriesId, out.series.id))
+      .all();
+    const styleRules = rules.filter(
+      (r) => r.type === "style_rule" && r.source === "seed",
+    );
+    expect(styleRules.length).toBe(5);
+    expect(styleRules.every((r) => r.status === "locked")).toBe(true);
+    expect(styleRules.every((r) => r.projectId === null)).toBe(true);
+  });
+
+  it("book_create adds a book to a series; book_rename renames it", async () => {
+    const { ctx } = ctxFor();
+    const created = (await tool("book_create").handler(ctx, {
+      title: "Book 4",
+      seriesId: 1,
+    })) as { book: { id: number; title: string; seriesId: number | null } };
+    expect(created.book.title).toBe("Book 4");
+    expect(created.book.seriesId).toBe(1);
+
+    const renamed = (await tool("book_rename").handler(ctx, {
+      id: created.book.id,
+      title: "Book Four",
+    })) as { book: { title: string } };
+    expect(renamed.book.title).toBe("Book Four");
+  });
+
+  it("book_create rejects an unknown series", async () => {
+    const { ctx } = ctxFor();
+    await expect(
+      (async () =>
+        tool("book_create").handler(ctx, { title: "Orphan", seriesId: 9999 }))(),
+    ).rejects.toThrow(/not found/i);
   });
 });

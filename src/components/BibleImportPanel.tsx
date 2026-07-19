@@ -179,7 +179,13 @@ export function BibleImportPanel({
     const res = await fetch("/api/bible/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, fixtureKey }),
+      // A16: send the chosen scope so the dedup context is scoped to the target
+      // series (a book scope resolves to the book's series).
+      body: JSON.stringify({
+        text,
+        fixtureKey,
+        scope: scope === "series" ? "series" : Number(scope),
+      }),
     });
     setBusy(false);
     if (!res.ok) {

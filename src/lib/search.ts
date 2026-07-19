@@ -29,6 +29,10 @@ export interface SearchHit {
   kind: SearchKind;
   id: number;
   projectId: number | null;
+  // A16: the owning series of this row. Series-wide canon/threads and every
+  // character carry it; the thread deep-link resolves "the first book of ITS
+  // series" from it.
+  seriesId: number | null;
   // Display title. Chapters with no title fall back to "Chapter N"; canon hits
   // have an empty title (the content IS the snippet); state hits carry the
   // owning character's name.
@@ -54,6 +58,9 @@ export interface SearchOptions {
   query: string;
   kinds?: SearchKind[];
   projectId?: number;
+  // A16: an optional series filter. Default palette search stays global across all
+  // series (finding things is the point); pass a seriesId to narrow to one series.
+  seriesId?: number;
   includeRetired?: boolean;
   limit?: number;
 }
@@ -84,6 +91,7 @@ interface RawRow {
   kind: string;
   refId: number | string;
   projectId: number | string | null;
+  seriesId: number | string | null;
   meta: string | null;
   title: string | null;
   snip: string | null;
@@ -113,6 +121,9 @@ export function searchIndex(db: Db, opts: SearchOptions): SearchHit[] {
   if (typeof opts.projectId === "number") {
     conds.push(sql`(project_id IS NULL OR project_id = ${opts.projectId})`);
   }
+  if (typeof opts.seriesId === "number") {
+    conds.push(sql`series_id = ${opts.seriesId}`);
+  }
   if (!opts.includeRetired) {
     conds.push(
       sql`NOT (kind = 'canon' AND json_extract(meta, '$.status') = 'retired')`,
@@ -127,12 +138,13 @@ export function searchIndex(db: Db, opts: SearchOptions): SearchHit[] {
     SELECT kind,
            ref_id AS refId,
            project_id AS projectId,
+           series_id AS seriesId,
            meta,
            title,
            snippet(search_index, -1, char(1), char(2), '...', 12) AS snip
     FROM search_index
     WHERE ${sql.join(conds, sql` AND `)}
-    ORDER BY bm25(search_index, 0, 0, 0, 0, 4.0, 1.0)
+    ORDER BY bm25(search_index, 0, 0, 0, 0, 0, 4.0, 1.0)
     LIMIT ${limit}
   `);
   return rows.map(shapeHit);
@@ -151,6 +163,7 @@ function shapeHit(r: RawRow): SearchHit {
       : "canon",
     id: Number(r.refId),
     projectId: r.projectId === null ? null : Number(r.projectId),
+    seriesId: r.seriesId === null ? null : Number(r.seriesId),
     title: r.title ?? "",
     snippet: r.snip ?? "",
   };

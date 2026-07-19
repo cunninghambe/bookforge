@@ -54,7 +54,18 @@ import {
   type ThreadFlags,
 } from "../lib/threadFlags";
 import { latestDraft } from "../lib/repo/drafts";
-import { getProject } from "../lib/repo/projects";
+import {
+  getProject,
+  createProject,
+  updateProjectTitle,
+  type Project,
+} from "../lib/repo/projects";
+import {
+  listSeries,
+  getSeries,
+  createSeries,
+  type Series,
+} from "../lib/repo/series";
 import { logLlmCall } from "../lib/repo/llm";
 import { assemblePrompt } from "../lib/assembler";
 import { buildExport } from "../lib/export";
@@ -176,6 +187,20 @@ function shapeThreadTouch(t: TouchWithChapter) {
   };
 }
 
+// A16: a series card and a book card.
+function shapeSeries(s: Series) {
+  return { id: s.id, title: s.title, orderIndex: s.orderIndex };
+}
+
+function shapeProject(p: Project) {
+  return {
+    id: p.id,
+    title: p.title,
+    orderIndex: p.orderIndex,
+    seriesId: p.seriesId,
+  };
+}
+
 // ---- LLM helpers (non-streaming, em-dash lint mirrors the routes) ---------
 
 interface LintedCompletion {
@@ -252,18 +277,28 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "canon_add",
     description:
-      "Add a canon fact. status must be explicitly \"provisional\" or \"locked\" (there is no default and \"retired\" is not allowed here). Omit projectId or pass null for a series-wide fact, or pass a book's project id. Source is recorded as \"mcp\".",
+      "Add a canon fact. status must be explicitly \"provisional\" or \"locked\" (there is no default and \"retired\" is not allowed here). Pass a book's projectId for a book fact (its series is inferred). For a series-wide fact omit projectId and pass seriesId. Omitting both projectId and seriesId is an error: a series-wide fact must name its series. Source is recorded as \"mcp\".",
     inputSchema: {
       type: canonTypeSchema,
       content: z.string().min(1),
       status: z.enum(["provisional", "locked"]),
       projectId: z.number().int().nullable().optional(),
+      seriesId: z.number().int().optional(),
     },
     handler: (ctx, args) => {
       const projectId =
         typeof args.projectId === "number" ? (args.projectId as number) : null;
+      const seriesId =
+        typeof args.seriesId === "number" ? (args.seriesId as number) : null;
+      // A16: a series-wide item (no projectId) must name its series.
+      if (projectId === null && seriesId === null) {
+        throw new Error(
+          "a series-wide canon fact must name its series: pass seriesId (or pass a book's projectId instead)",
+        );
+      }
       const fact = createCanon(ctx.db, {
         projectId,
+        seriesId,
         type: args.type as CanonType,
         content: (args.content as string).trim(),
         status: args.status as "provisional" | "locked",
@@ -297,10 +332,15 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "characters_list",
-    description: "List all tracked characters (card fields only). Returns compact JSON.",
-    inputSchema: {},
-    handler: (ctx) => {
-      return { characters: listCharacters(ctx.db).map(shapeCharacter) };
+    description:
+      "List tracked characters (card fields only). Pass seriesId to list one series' roster; omit it to list every character across all series. Returns compact JSON.",
+    inputSchema: {
+      seriesId: z.number().int().optional(),
+    },
+    handler: (ctx, args) => {
+      const seriesId =
+        typeof args.seriesId === "number" ? (args.seriesId as number) : undefined;
+      return { characters: listCharacters(ctx.db, seriesId).map(shapeCharacter) };
     },
   },
   {
@@ -780,19 +820,30 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "thread_create",
     description:
-      "Create a story thread. type is one of arc, mystery, promise, relationship. Omit projectId or pass null for a series-wide thread, or pass a book's project id. Optional character pair for relationship threads. Returns the created thread.",
+      "Create a story thread. type is one of arc, mystery, promise, relationship. Pass a book's projectId for a book thread (its series is inferred). For a series-wide thread omit projectId and pass seriesId. Omitting both projectId and seriesId is an error: a series-wide thread must name its series. Optional character pair for relationship threads. Returns the created thread.",
     inputSchema: {
       name: z.string().min(1),
       type: z.enum(THREAD_TYPES),
       projectId: z.number().int().nullable().optional(),
+      seriesId: z.number().int().optional(),
       note: z.string().optional(),
       characterAId: z.number().int().nullable().optional(),
       characterBId: z.number().int().nullable().optional(),
     },
     handler: (ctx, args) => {
+      const projectId =
+        typeof args.projectId === "number" ? (args.projectId as number) : null;
+      const seriesId =
+        typeof args.seriesId === "number" ? (args.seriesId as number) : null;
+      // A16: a series-wide item (no projectId) must name its series.
+      if (projectId === null && seriesId === null) {
+        throw new Error(
+          "a series-wide thread must name its series: pass seriesId (or pass a book's projectId instead)",
+        );
+      }
       const thread = createThread(ctx.db, {
-        projectId:
-          typeof args.projectId === "number" ? (args.projectId as number) : null,
+        projectId,
+        seriesId,
         name: (args.name as string).trim(),
         type: args.type as ThreadType,
         note: (args.note as string | undefined) ?? null,
@@ -882,6 +933,66 @@ export const TOOL_DEFS: ToolDef[] = [
       if (!getThread(ctx.db, id)) throw new Error(`thread ${id} not found`);
       const thread = updateThread(ctx.db, id, { status: "retired" });
       return { thread: thread ? shapeThread(thread) : null };
+    },
+  },
+  {
+    name: "series_list",
+    description:
+      "List all series (id, title, order index) in order. A series is the container that scopes canon, characters, and threads; a book belongs to one series (A16). No LLM call.",
+    inputSchema: {},
+    handler: (ctx) => {
+      return { series: listSeries(ctx.db).map(shapeSeries) };
+    },
+  },
+  {
+    name: "series_create",
+    description:
+      "Create a new series. Copies the five seed style rules into it as locked series-wide facts and creates its first book with a default title, so it is ready to write. Returns the created series and its first book. No LLM call.",
+    inputSchema: {
+      title: z.string().min(1),
+      firstBookTitle: z.string().optional(),
+    },
+    handler: (ctx, args) => {
+      const { series, firstBook } = createSeries(ctx.db, {
+        title: (args.title as string).trim(),
+        firstBookTitle: args.firstBookTitle as string | undefined,
+      });
+      return { series: shapeSeries(series), firstBook: shapeProject(firstBook) };
+    },
+  },
+  {
+    name: "book_create",
+    description:
+      "Create a book (project) in a series. Pass title and the seriesId it belongs to. The book is appended at the end of that series in reading order. Returns the created book. No LLM call.",
+    inputSchema: {
+      title: z.string().min(1),
+      seriesId: z.number().int(),
+    },
+    handler: (ctx, args) => {
+      const seriesId = args.seriesId as number;
+      if (!getSeries(ctx.db, seriesId)) {
+        throw new Error(`series ${seriesId} not found`);
+      }
+      const project = createProject(ctx.db, {
+        title: (args.title as string).trim(),
+        seriesId,
+      });
+      return { book: shapeProject(project) };
+    },
+  },
+  {
+    name: "book_rename",
+    description:
+      "Rename a book (title only). Does not move it between series (there is no cross-series move). Returns the updated book. No LLM call.",
+    inputSchema: {
+      id: z.number().int(),
+      title: z.string().min(1),
+    },
+    handler: (ctx, args) => {
+      const id = args.id as number;
+      if (!getProject(ctx.db, id)) throw new Error(`book ${id} not found`);
+      const project = updateProjectTitle(ctx.db, id, (args.title as string).trim());
+      return { book: project ? shapeProject(project) : null };
     },
   },
 ];

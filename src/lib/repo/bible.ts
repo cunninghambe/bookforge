@@ -10,6 +10,8 @@ import {
   type Character,
   type CharacterState,
 } from "./characters";
+import { getProject } from "./projects";
+import { firstSeriesId } from "./series";
 
 type Db = BetterSQLite3Database<typeof schema>;
 
@@ -54,6 +56,10 @@ export interface BibleApproveInput {
   // States require a book scope (a number); a series scope with any state is
   // rejected.
   scope: "series" | number;
+  // A16: the owning series for created facts and characters. For a book scope it
+  // is derived from the book (ignored if passed); for a series scope it names the
+  // series, defaulting to the first series when omitted.
+  seriesId?: number;
   facts: ApprovedBibleFact[];
   characters: ApprovedBibleCharacter[];
   states: ApprovedBibleState[];
@@ -86,6 +92,13 @@ function nonEmpty(v: string | null | undefined): string | null {
 export function approveBible(db: Db, input: BibleApproveInput): BibleApproveResult {
   const projectId = input.scope === "series" ? null : input.scope;
   const source = "bible";
+  // A16: the series every created fact and character lands in. A book scope
+  // inherits the book's series; a series scope uses the named series, else the
+  // first series (the documented default).
+  const seriesId =
+    typeof projectId === "number"
+      ? getProject(db, projectId)?.seriesId ?? firstSeriesId(db) ?? undefined
+      : input.seriesId ?? firstSeriesId(db) ?? undefined;
 
   // States require a book scope. Enforced on the server even though the UI hides
   // the states section for a series-wide import.
@@ -124,6 +137,7 @@ export function approveBible(db: Db, input: BibleApproveInput): BibleApproveResu
         } else {
           const created = createCharacter(db, {
             name: c.name,
+            seriesId,
             role: nonEmpty(c.role),
             voiceRules: nonEmpty(c.voiceRules),
             physical: nonEmpty(c.physical),
@@ -143,7 +157,7 @@ export function approveBible(db: Db, input: BibleApproveInput): BibleApproveResu
         if (typeof s.characterId === "number" && getCharacter(db, s.characterId)) {
           cid = s.characterId;
         } else if (s.character) {
-          const found = findCharacterByName(db, s.character);
+          const found = findCharacterByName(db, s.character, seriesId);
           if (found) cid = found.id;
         }
         if (cid === null) {
@@ -161,6 +175,7 @@ export function approveBible(db: Db, input: BibleApproveInput): BibleApproveResu
         createdFacts.push(
           createCanon(db, {
             projectId,
+            seriesId,
             type: f.type,
             content: f.content,
             status: "locked",
