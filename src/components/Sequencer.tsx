@@ -154,9 +154,21 @@ function ChapterRow({
           </button>
         </div>
         <span className="w-6 text-sm text-faint">{index + 1}</span>
-        <span data-testid="chapter-title" className="flex-1 font-medium">
-          {chapter.title || "Untitled"}
-        </span>
+        {/* The title opens the chapter: locked and in-review chapters land on
+            the reading/notes surface, pipeline chapters on the draft surface.
+            Before this fix the only navigation was Start drafting inside the
+            editor, so a fully locked book had no clickable chapters at all. */}
+        <Link
+          href={`/book/${chapter.projectId}/chapter/${chapter.id}/${
+            chapter.status === "locked" || chapter.status === "review"
+              ? "review"
+              : "draft"
+          }`}
+          data-testid="chapter-open-link"
+          className="flex-1 font-medium text-ink hover:underline"
+        >
+          <span data-testid="chapter-title">{chapter.title || "Untitled"}</span>
+        </Link>
         <span className="text-sm text-muted">
           {chapter.pov || "no POV"}
         </span>

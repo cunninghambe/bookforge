@@ -1938,6 +1938,22 @@ position (`extraction.scan1.1.json`, `extraction.scan1.2.json`), with a
 deliberately unparseable `extraction.scanfail.1.json` planting a per-chapter failure
 whose reason surfaces while `extraction.scanfail.2.json` still proposes.
 
+## Sequencer chapter-link fix
+
+### D157: Chapter titles are links; locked and in-review chapters open the reading surface
+
+Found live: a book whose chapters are all locked (an imported finished book)
+had no clickable path into any chapter, because the sequencer's only
+navigation was the Start drafting link inside the expanded editor, a path
+that assumes the chapter is still moving through the pipeline. Every e2e
+flow drove chapters through that pipeline, so the gap never surfaced until
+real imported data hit it. The title is now a link on every row: planned,
+interrogating, and drafting chapters open the draft surface; locked and
+in-review chapters open the review surface (reading plus notes, where
+Listen also lives), which is what an author wants from finished text. The
+Edit button and every existing testid are unchanged; a regression e2e
+(fix-chapter-links.spec.ts) pins both link targets and the click-through.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

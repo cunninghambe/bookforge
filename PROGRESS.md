@@ -1882,3 +1882,13 @@ chapter picker; the scan prompt requests only the threads section and the
 existing parser reads it unchanged; within-run linkage lives in a sibling
 accumulator so no A12 caller changes; per-touch source stamping from each
 touch's own chapter.
+---
+
+## Sequencer chapter-link fix (2026-07-19)
+
+Field report: on the deployed app, no chapter on /book/1 was clickable. The
+sequencer's chapter titles were plain text; its only navigation was Start
+drafting inside the expanded editor, so a fully locked (imported) book had
+no way in. Titles are now links (pipeline chapters to draft, locked and
+in-review chapters to review), with a regression e2e pinning the targets
+and click-through. 448 unit + 52 e2e green. See D157.
