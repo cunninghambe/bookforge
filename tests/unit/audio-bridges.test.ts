@@ -1,8 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { minimalWav, isWav } from "@/lib/audio/wav";
 import { chooseAudioFormat } from "@/lib/audio/ffmpeg";
 import { synthesizeSpeech } from "@/lib/audio/tts";
-import { parseTranscript, transcribeAudio } from "@/lib/audio/stt";
+import { parseTranscript, transcribeAudio, isWavBytes } from "@/lib/audio/stt";
 import { ttsEnabled, sttEnabled } from "@/lib/audio/config";
 
 // Snapshot and restore the env vars these tests toggle, so ordering never leaks.
@@ -91,5 +91,42 @@ describe("feature gating by service URL", () => {
     // Blank (whitespace) counts as unset.
     process.env.TTS_SERVICE_URL = "   ";
     expect(ttsEnabled()).toBe(false);
+  });
+});
+
+describe("isWavBytes (voice-note transcode gate)", () => {
+  it("recognizes RIFF/WAVE bytes", () => {
+    expect(isWavBytes(minimalWav())).toBe(true);
+  });
+
+  it("rejects webm bytes, other containers, and short buffers", () => {
+    // EBML magic that starts every webm/mkv file.
+    const webm = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(isWavBytes(webm)).toBe(false);
+    const oggMagic = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(isWavBytes(oggMagic)).toBe(false);
+    expect(isWavBytes(new Uint8Array([0x52, 0x49]))).toBe(false);
+  });
+});
+
+describe("STT service error surfacing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces whisper's error field instead of returning an empty transcript", async () => {
+    delete process.env.USE_FIXTURE_LLM;
+    process.env.STT_SERVICE_URL = "http://stt.invalid";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ error: "failed to read audio data" }),
+      })),
+    );
+    // WAV bytes skip the transcode path entirely, so no ffmpeg is involved.
+    await expect(
+      transcribeAudio(minimalWav(), "note.wav", "audio/wav"),
+    ).rejects.toThrow(/failed to read audio data/);
   });
 });

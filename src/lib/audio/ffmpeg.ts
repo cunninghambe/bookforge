@@ -52,6 +52,55 @@ export function __resetFfmpegDetection(): void {
   detection = null;
 }
 
+// Transcodes browser-recorded audio (webm/opus, mp4, ogg) to the 16 kHz mono
+// 16-bit WAV the whisper.cpp server's reader accepts. Browser recordings are
+// NOT decodable by the STT service directly (verified in production: a webm
+// upload returns "failed to read audio data"), so the voice-note path runs
+// this when ffmpeg is present. Same pipe shape as the Opus transcode below.
+export function transcodeToWav16k(input: Uint8Array): Promise<Buffer> {
+  return new Promise<Buffer>((resolvePromise, reject) => {
+    const child = spawn(
+      "ffmpeg",
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        "pipe:0",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        "pipe:1",
+      ],
+      { windowsHide: true },
+    );
+    const out: Buffer[] = [];
+    let err = "";
+    child.stdout?.on("data", (d) => out.push(d as Buffer));
+    child.stderr?.on("data", (d) => (err += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0 && out.length > 0) {
+        resolvePromise(Buffer.concat(out));
+      } else {
+        reject(
+          new Error(`ffmpeg wav transcode failed (code ${code}): ${err.trim()}`),
+        );
+      }
+    });
+    child.stdin?.on("error", () => {
+      // The child may exit before stdin drains; the close handler reports it.
+    });
+    child.stdin?.write(input);
+    child.stdin?.end();
+  });
+}
+
 // Transcodes a WAV buffer to Opus (Ogg) via ffmpeg over pipes. Rejects on spawn
 // failure or a non-zero exit; callers fall back to serving the original WAV so a
 // transcode hiccup is never surfaced as an error.

@@ -2017,6 +2017,26 @@ built, so the existing sweep fixtures drive the new flow and both sweep e2e spec
 unchanged. Neither spec asserted the old transport mechanics; both drive the UI and
 assert outcomes, so no spec was adjusted.
 
+## Listen and voice-note field fixes
+
+### D162: Voice notes transcode to WAV server-side; the player buffers visibly and warms the whole chapter
+
+Two field failures from the first real phone session. (1) Voice notes always
+failed: browsers record webm/opus (or mp4), and the whisper.cpp server only
+reads WAV natively; production returned "failed to read audio data" (the A14
+verification had used a WAV, masking it). The STT bridge now transcodes
+anything that is not RIFF/WAVE to 16 kHz mono WAV via ffmpeg before posting
+(original bytes pass through when ffmpeg is absent), and a whisper error field
+is surfaced as the failure reason instead of degrading to an empty transcript.
+(2) Listen went silent mid-chapter: production logs showed 5 to 15 second
+synthesis times per paragraph while short dialogue paragraphs play in 3 to 5,
+so the one-ahead prefetch starved; a rejected audio.play() after a stall was
+also swallowed while the UI claimed to be playing. The player now runs a
+sequential whole-chapter warm loop (one request at a time; the synthesizer is
+the bottleneck), shows a visible synthesizing state while stalled, and turns a
+rejected play() into an explicit tap-to-continue prompt. Fixture-driven tests
+never stall, so every existing a14 assertion is unchanged.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

@@ -38,9 +38,26 @@ export function ListenPlayer({
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
   const [ready, setReady] = useState(false);
+  // True while the element is stalled waiting on audio bytes (synthesis of a
+  // long paragraph can take 5 to 15 seconds server-side); surfaced in the UI so
+  // a pipeline gap reads as buffering, never as the player dying (field bug:
+  // "listen cuts out after a few paragraphs").
+  const [buffering, setBuffering] = useState(false);
+  // Set when audio.play() rejected (mobile user-activation expiry after a long
+  // stall). The UI flips to Play with a visible nudge instead of claiming to
+  // play silence.
+  const [needsResume, setNeedsResume] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const indexRef = useRef(0);
   indexRef.current = index;
+  const countRef = useRef(count);
+  countRef.current = count;
+  // Sequential warm-ahead bookkeeping: which paragraphs have been fetched (and
+  // therefore synthesized into the server cache), and whether the single warm
+  // loop is running. One request at a time: the synthesis service is the
+  // bottleneck and parallel requests would just queue there anyway.
+  const warmedRef = useRef<Set<number>>(new Set());
+  const warmingRef = useRef(false);
 
   const src = `/api/chapters/${chapterId}/audio/${index}`;
 
@@ -68,7 +85,35 @@ export function ListenPlayer({
       .catch(() => undefined);
   }, [chapterId, initialParagraphCount]);
 
-  // Persist position and prefetch the next paragraph to hide synthesis latency.
+  // Warms every remaining paragraph sequentially from the given index: each
+  // fetch triggers on-miss synthesis into the server cache, so playback stops
+  // outrunning the synthesizer (the field cutouts: short dialogue paragraphs
+  // play in 3 to 5 seconds while the next synthesis takes 5 to 15, and a
+  // one-ahead prefetch starves). One loop per mount; retries happen naturally
+  // on demand when the audio element requests a paragraph the warm loop missed.
+  const warmFrom = useCallback(
+    async (start: number) => {
+      if (warmingRef.current) return;
+      warmingRef.current = true;
+      try {
+        for (let i = start; i < countRef.current; i += 1) {
+          if (warmedRef.current.has(i)) continue;
+          try {
+            const r = await fetch(`/api/chapters/${chapterId}/audio/${i}`);
+            if (r.ok) warmedRef.current.add(i);
+          } catch {
+            // Transient network failure: leave unwarmed; the element fetches on
+            // demand and the buffering state covers the gap.
+          }
+        }
+      } finally {
+        warmingRef.current = false;
+      }
+    },
+    [chapterId],
+  );
+
+  // Persist position and keep the warm-ahead loop running.
   useEffect(() => {
     if (!ready) return;
     try {
@@ -76,20 +121,24 @@ export function ListenPlayer({
     } catch {
       // Storage may be unavailable (private mode); resume is a nicety, not required.
     }
-    if (index + 1 < count) {
-      void fetch(`/api/chapters/${chapterId}/audio/${index + 1}`).catch(
-        () => undefined,
-      );
-    }
-  }, [chapterId, index, count, ready]);
+    void warmFrom(index + 1);
+  }, [chapterId, index, ready, warmFrom]);
 
   // Drive the element from the playing/index state. A src change (index) reloads the
-  // element, so re-issuing play here resumes at the new paragraph.
+  // element, so re-issuing play here resumes at the new paragraph. A rejected
+  // play() (mobile user-activation expiry after a stall) flips the UI to a
+  // visible resume state instead of silently pretending to play.
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     if (playing) {
-      void audio.play().catch(() => undefined);
+      audio.play().then(
+        () => setNeedsResume(false),
+        () => {
+          setPlaying(false);
+          setNeedsResume(true);
+        },
+      );
     } else {
       audio.pause();
     }
@@ -142,6 +191,10 @@ export function ListenPlayer({
         src={src}
         preload="auto"
         onEnded={onEnded}
+        onWaiting={() => setBuffering(true)}
+        onStalled={() => setBuffering(true)}
+        onCanPlay={() => setBuffering(false)}
+        onPlaying={() => setBuffering(false)}
         onLoadedData={() => {
           if (audioRef.current) audioRef.current.playbackRate = rate;
         }}
@@ -150,6 +203,17 @@ export function ListenPlayer({
       <p data-testid="listen-position" className="text-lg text-muted">
         paragraph {index + 1} of {count}
       </p>
+
+      {playing && buffering && (
+        <p data-testid="listen-buffering" className="text-sm text-info-ink">
+          Synthesizing paragraph {index + 1}... audio resumes automatically.
+        </p>
+      )}
+      {needsResume && (
+        <p data-testid="listen-resume-note" className="text-sm text-warn-ink">
+          Playback paused by the browser. Tap Play to continue.
+        </p>
+      )}
 
       <div className="flex items-center gap-4">
         <button

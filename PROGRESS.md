@@ -1918,3 +1918,17 @@ preserved, and MCP sweep_book stays in-process and untouched. 453 unit
 tests; sweep e2e green in every run; full-suite results per the documented
 load-flake protocol with every spec green in isolation. See D159 through
 D161.
+---
+
+## Listen and voice-note field fixes (2026-07-19)
+
+Field report from the first real phone session: Listen went silent after a
+few paragraphs (resume required pause/play or skip), and voice notes failed
+twice with "Could not transcribe the note". Diagnosed on the box: whisper.cpp
+rejects browser webm recordings ("failed to read audio data"), and audio
+synthesis runs 5 to 15 seconds per paragraph while short paragraphs play
+faster, starving the one-ahead prefetch. Fixes in D162: server-side ffmpeg
+transcode of voice notes to 16 kHz WAV with real error surfacing, and a
+player with a whole-chapter sequential warm loop, a visible synthesizing
+state, and tap-to-continue after a browser-rejected play. 456 unit tests;
+a14 e2e green.
