@@ -189,6 +189,101 @@ export function normalizeThreadProposals(
   return { attaches, news };
 }
 
+// ---- Amendment A17: thread backfill scan within-run linkage ---------------
+
+// A17: one scanned chapter's raw thread proposals, tagged with the chapter they
+// came from, fed to accumulateScanProposals in scan order.
+export interface ScanChapterProposals {
+  chapterId: number;
+  order: number; // 1-based chapter number, for display
+  proposals: ThreadProposal[];
+}
+
+// A17: one proposed touch inside a merged scan group. Carries its own chapter so
+// approval can stamp source 'scan:<chapter_id>' per touch (provenance survives
+// even when a group spans several chapters).
+export interface ScanTouchProposal {
+  chapterId: number;
+  order: number; // 1-based chapter number
+  kind: TouchKind;
+  evidence: string | null;
+}
+
+// A17: an attach group targets one existing thread and carries every touch the
+// run proposed for it, across all scanned chapters.
+export interface ScanAttachGroup {
+  threadId: number;
+  name: string; // the existing thread's name
+  touches: ScanTouchProposal[];
+}
+
+// A17: a new-thread group is one within-run-deduplicated proposed thread and all
+// the touches the run proposed for it. type is the first-seen type (already
+// defaulted to 'arc' by normalizeThreadProposals when the model omitted one).
+export interface ScanNewGroup {
+  name: string; // first-seen casing
+  type: ThreadType;
+  touches: ScanTouchProposal[];
+}
+
+// A17: merge a whole scan run's per-chapter proposals into ONE checklist grouped
+// by thread. This EXTENDS the A12 normalization: each chapter is split with
+// normalizeThreadProposals (attach-to-existing preference over new, exactly as at
+// lock time), then the results are linked ACROSS chapters. Attaches merge by the
+// existing thread id; new threads merge by case-insensitive name, so chapter 7's
+// "Theo and Mara" lands on the same proposed thread as chapter 2's rather than
+// duplicating. Group and touch order follow first appearance in scan order, so
+// the checklist is deterministic. existing is the book's open threads (plus
+// series-wide) the scan advertised as attach targets.
+export function accumulateScanProposals(
+  chapters: ScanChapterProposals[],
+  existing: Array<{ id: number; name: string }>,
+): { attaches: ScanAttachGroup[]; news: ScanNewGroup[] } {
+  const nameById = new Map<number, string>();
+  for (const e of existing) nameById.set(e.id, e.name);
+
+  const attachMap = new Map<number, ScanAttachGroup>();
+  const newMap = new Map<string, ScanNewGroup>();
+  for (const ch of chapters) {
+    const { attaches, news } = normalizeThreadProposals(ch.proposals, existing);
+    for (const a of attaches) {
+      let g = attachMap.get(a.threadId);
+      if (!g) {
+        g = {
+          threadId: a.threadId,
+          name: nameById.get(a.threadId) ?? a.name,
+          touches: [],
+        };
+        attachMap.set(a.threadId, g);
+      }
+      g.touches.push({
+        chapterId: ch.chapterId,
+        order: ch.order,
+        kind: a.kind,
+        evidence: a.evidence,
+      });
+    }
+    for (const n of news) {
+      const key = n.name.trim().toLowerCase();
+      let g = newMap.get(key);
+      if (!g) {
+        g = { name: n.name, type: n.type, touches: [] };
+        newMap.set(key, g);
+      }
+      g.touches.push({
+        chapterId: ch.chapterId,
+        order: ch.order,
+        kind: n.kind,
+        evidence: n.evidence,
+      });
+    }
+  }
+  return {
+    attaches: [...attachMap.values()],
+    news: [...newMap.values()],
+  };
+}
+
 export interface Contradiction {
   chapter: number | null;
   quote: string | null;

@@ -1849,3 +1849,36 @@ is the strict layer (D141); per-series order_index; characters GET without
 seriesId returns all for back-compat; the canon page series switcher as the
 one UI addition beyond the SPEC's literal list, forced by the
 never-weaken-a-test rule (D148).
+---
+
+## Amendment A17: Thread backfill scan
+
+Status: COMPLETE. 448 unit tests and 51 e2e tests green in single clean runs
+(implementer and orchestrator independently); tsc clean.
+
+### What was built
+
+- A "Scan for threads" flow on the threads page: default range is the book's
+  locked chapters with no thread touches (an includeTouched flag enables
+  explicit rescans); one extraction-purpose call per chapter, sequential,
+  with the sweep's cost warning, progress, and per-chapter failure reasons
+  that never stop the rest of the run.
+- The scan reuses the A12 threads extraction contract wholesale; a new
+  accumulator links proposals ACROSS chapters in the run (case-insensitive)
+  and prefers attaching to existing threads, so one storyline surfaced in
+  five chapters arrives as one proposed thread with five touches.
+- Results merge into one approval checklist grouped by thread (the bible
+  importer pattern) with per-touch checkoffs, keyboard a/r, and the A15 tap
+  targets. Approval is atomic; touches carry source scan:<chapter_id>;
+  rejection leaves no trace; the braid fills in on the spot. The empty
+  threads page now invites the scan when locked chapters exist.
+- Web UI only by design: no MCP scan tool (proposals are ephemeral until a
+  human approves; recorded as a decision).
+
+### Judgment calls
+
+See D149 through D156: range plus includeTouched instead of a sparse
+chapter picker; the scan prompt requests only the threads section and the
+existing parser reads it unchanged; within-run linkage lives in a sibling
+accumulator so no A12 caller changes; per-touch source stamping from each
+touch's own chapter.

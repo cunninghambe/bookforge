@@ -1849,6 +1849,95 @@ because its Book 2 scope resolves to the trilogy exactly as before. Cross-series
 character sharing, per-series settings/theming, and deleting or archiving a
 series or book remain non-goals (removal stays a manual database operation).
 
+## Amendment A17: thread backfill scan
+
+### D149: web UI only, no MCP scan tool (recorded non-goal)
+
+The scan is a threads-page flow with no MCP surface. Scan proposals are ephemeral
+until approved, and MCP must never approve extraction-style proposals (the standing
+gate discipline: no tool approves what only the human checklist may). Exposing a
+`threads_scan` tool would either return unapproved proposals nobody can act on
+through MCP or smuggle an approval path around the gate, so neither is built. The
+MCP tool-surface tests are untouched: no new tool name joins the list.
+
+### D150: the scan is the sweep loop reshaped, over the A12 normalization, not a new pipeline
+
+`runScan` is `runSweep`'s shape (sequential one-call-per-locked-chapter, every call
+logged with the chapter id, per-chapter LLM/parse failure carried as an outcome
+while the run continues per A2.2) pointed at thread recovery. Parsing REUSES
+`parseExtractionResponse` (a reply carrying only a `threads` key parses with empty
+facts/states), and the attach-vs-new split REUSES `normalizeThreadProposals`. The
+model routing is the existing `extraction` purpose via `modelFor`; no new purpose,
+per SPEC. So the scan adds a loop and a merge, not a second extraction stack.
+
+### D151: default range is locked and touchless; an explicit rescan opts in with includeTouched
+
+`scanTargets` returns the locked chapters in the order range, minus any that
+already carry a thread touch, unless `includeTouched` is set. The default
+(includeTouched false) is exactly "every locked chapter with no touches yet", so
+running the default scan again proposes nothing for chapters a prior run already
+populated. Unlocked chapters are never scanned in either mode: locked text is the
+settled record. The threads page derives the touched-chapter set from the loaded
+threads so the estimate matches the server's target set without a second query.
+
+### D152: within-run linkage merges attaches by thread id and new threads by case-insensitive name
+
+`accumulateScanProposals` extends the A12 normalization across a whole run: each
+chapter is split with `normalizeThreadProposals` (attach-to-existing preference
+intact), then attaches merge by the existing thread id and new threads merge by
+trimmed-lowercased name, in first-appearance order, so chapter 7's "Theo and Mara"
+lands on chapter 2's proposed thread instead of duplicating. The loop also feeds
+the names proposed so far forward into each later chapter's prompt (the model is
+nudged to reuse them), but the merge is authoritative regardless of what the model
+echoes back. Group and touch order are deterministic (Map insertion order), so the
+checklist and its flat keyboard sequence are stable.
+
+### D153: source 'scan:<chapter_id>' per touch, via a chapter-scoped approveScan sibling
+
+Lock-time approval stamps one chapter's id on every touch; a scan approval spans
+several chapters, so `approveScan` stamps `scan:<chapter_id>` per touch from the
+touch's own chapter, distinguishing scan provenance from lock-time
+`extraction:<chapter_id>`. It is a sibling of `approveExtraction`, not an extension:
+it validates that every referenced chapter is a LOCKED chapter of this book and
+every attach targets a live thread, and rejects the WHOLE call on any dangling
+reference (atomic, no trace), then creates new threads with their touches and
+inserts attach touches in one transaction. `createThread` resolves the series from
+the book, so A16 scoping holds automatically. Nothing auto-resolves; flags
+recompute on the next load and the braid fills in.
+
+### D154: one merged checklist grouped by thread, inside the threads manager so approval reloads the braid
+
+Results merge into ONE approval checklist (the bible importer's chunks-merge
+pattern) grouped by thread: an attach group shows the existing thread's name, a new
+group shows name and type, and each carries every touch the run found (chapter,
+kind, evidence) as an individually check-off-able row. The rows share the standard
+keyboard recipe (arrows move across the whole flat touch sequence, a approves, r
+rejects) and the A15 `MobileApproveReject` tap targets, wired to the same setters,
+so there is one approval code path. `ScanPanel` lives inside `ThreadsManager` and
+takes its `load` as `onApproved`, so approving reloads threads, chapters, and the
+braid in place. The threads empty state (locked chapters, zero threads) renders the
+scan invitation and opens the panel, so the empty page is the entry point.
+
+### D155: a dedicated scan prompt that asks only for the A12 threads section
+
+`scanThreadsPrompt` is a sibling of `extractionPrompt` reusing its threads-section
+contract text, but it asks ONLY for thread touches (the scan recovers threads, not
+facts or states) and carries the chapter's locked text and summary, the book's open
+threads as attach targets, and the names already proposed earlier in the run. The
+reply contract is exactly `{ "threads": [...] }`, which `parseExtractionResponse`
+reads unchanged. It forbids em-dashes like every other template.
+
+### D156: e2e provisions its own series and book for a deterministic default range
+
+Because the default scan range is the whole book's locked chapters, the A17 e2e
+cannot share Book 1 (other specs seed it with unpredictable chapters and threads).
+Each test creates its own series (which lands a first book) via `POST /api/series`,
+locks two chapters in it, and scans that book, so the range is exactly two known
+chapters. Per-chapter fixtures follow the sweep pattern: base key plus 1-based
+position (`extraction.scan1.1.json`, `extraction.scan1.2.json`), with a
+deliberately unparseable `extraction.scanfail.1.json` planting a per-chapter failure
+whose reason surfaces while `extraction.scanfail.2.json` still proposes.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

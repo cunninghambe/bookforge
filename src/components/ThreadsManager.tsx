@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { orderToUiChapter, uiChapterToOrder } from "@/lib/chapterNumbering";
 import { buildBraidLayout, type BraidChapterInput, type BraidThreadInput, type BraidTouchInput } from "@/lib/braidLayout";
 import { BraidView } from "./BraidView";
+import { ScanPanel } from "./ScanPanel";
 
 // Amendment A12 (phase 2): the threads page. Mirrors the CanonManager pattern
 // (sequence-guarded fetch, highlight scroll-and-flash) but with a second data
@@ -145,6 +146,25 @@ export function ThreadsManager({
     return buildBraidLayout(braidThreads, braidTouches, braidChapters);
   }, [threads, chapters]);
 
+  // A17: the scan runs over the book's LOCKED chapters. The touched-chapter set
+  // (drawn from the loaded threads) lets the estimate skip chapters that already
+  // have touches, matching the server's default range.
+  const lockedChapters = useMemo(
+    () =>
+      chapters
+        .filter((c) => c.status === "locked")
+        .map((c) => ({
+          id: c.id,
+          orderIndex: c.orderIndex,
+          title: c.title || `Chapter ${orderToUiChapter(c.orderIndex)}`,
+        })),
+    [chapters],
+  );
+  const touchedChapterIds = useMemo(
+    () => threads.flatMap((t) => t.touches.map((touch) => touch.chapterId)),
+    [threads],
+  );
+
   const threadsById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
   // The list mirrors the braid's row order exactly, so the two panels stay
   // pixel-aligned as one selection (SPEC: "two views of one selection").
@@ -155,6 +175,14 @@ export function ThreadsManager({
   return (
     <div>
       <NewThreadForm projectId={projectId} characters={characters} onCreated={load} />
+
+      <ScanPanel
+        projectId={projectId}
+        lockedChapters={lockedChapters}
+        touchedChapterIds={touchedChapterIds}
+        startInvited={!loading && threads.length === 0 && lockedChapters.length > 0}
+        onApproved={load}
+      />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[380px_1fr]">
         <div className="min-w-0">

@@ -196,6 +196,120 @@ export function approveExtraction(db: Db, input: ApproveInput): ApproveResult {
   return { ok: true, createdFacts, createdStates, createdThreads, createdTouches };
 }
 
+// A17: one approved touch inside a scan group. Unlike a lock-time approval, a
+// scan touch names its own chapter, because one merged group can span several
+// scanned chapters; the source is stamped 'scan:<chapter_id>' per touch.
+export interface ScanApprovedTouch {
+  chapterId: number;
+  kind: TouchKind;
+  evidence?: string | null;
+}
+
+// A17: an approved attach group adds touches to an existing thread.
+export interface ScanApprovedAttach {
+  threadId: number;
+  touches: ScanApprovedTouch[];
+}
+
+// A17: an approved new-thread group creates the thread and all its approved
+// touches together, atomically.
+export interface ScanApprovedNew {
+  name: string;
+  type: ThreadType;
+  touches: ScanApprovedTouch[];
+}
+
+export interface ApproveScanInput {
+  projectId: number;
+  attaches: ScanApprovedAttach[];
+  newThreads: ScanApprovedNew[];
+}
+
+export type ApproveScanResult =
+  | { ok: true; createdThreads: Thread[]; createdTouches: ThreadTouch[] }
+  | { ok: false; error: string; unmatched: string[] };
+
+// The scan approval gate (Amendment A17). Only the touches the author explicitly
+// approved land here. Every referenced chapter must be a LOCKED chapter of this
+// book and every attach must target a thread that still exists; any dangling
+// reference rejects the WHOLE call (atomic, no trace), exactly like
+// approveExtraction, so a partial run never half-writes. Approved attaches insert
+// touches on the existing thread; approved new-thread groups create the thread and
+// its touches together. Every touch is sourced 'scan:<chapter_id>' so its
+// provenance is distinguishable from lock-time 'extraction:<chapter_id>'.
+export function approveScan(db: Db, input: ApproveScanInput): ApproveScanResult {
+  const unmatched = new Set<string>();
+  const chapterValid = new Map<number, boolean>();
+  const isLockedChapter = (chapterId: number): boolean => {
+    const cached = chapterValid.get(chapterId);
+    if (cached !== undefined) return cached;
+    const ch = getChapter(db, chapterId);
+    const ok =
+      !!ch && ch.projectId === input.projectId && ch.status === "locked";
+    chapterValid.set(chapterId, ok);
+    return ok;
+  };
+
+  for (const a of input.attaches) {
+    if (!getThread(db, a.threadId)) unmatched.add(`thread ${a.threadId}`);
+    for (const t of a.touches) {
+      if (!isLockedChapter(t.chapterId)) unmatched.add(`chapter ${t.chapterId}`);
+    }
+  }
+  for (const n of input.newThreads) {
+    for (const t of n.touches) {
+      if (!isLockedChapter(t.chapterId)) unmatched.add(`chapter ${t.chapterId}`);
+    }
+  }
+  if (unmatched.size > 0) {
+    return {
+      ok: false,
+      error: "some proposals reference an unknown thread or a non-locked chapter",
+      unmatched: [...unmatched],
+    };
+  }
+
+  const createdThreads: Thread[] = [];
+  const createdTouches: ThreadTouch[] = [];
+  db.transaction(() => {
+    for (const a of input.attaches) {
+      for (const t of a.touches) {
+        createdTouches.push(
+          addTouch(db, {
+            threadId: a.threadId,
+            chapterId: t.chapterId,
+            kind: t.kind,
+            evidence: t.evidence ?? null,
+            source: `scan:${t.chapterId}`,
+          }),
+        );
+      }
+    }
+    for (const n of input.newThreads) {
+      const thread = createThread(db, {
+        projectId: input.projectId,
+        name: n.name,
+        type: n.type,
+        status: "open",
+      });
+      createdThreads.push(thread);
+      for (const t of n.touches) {
+        createdTouches.push(
+          addTouch(db, {
+            threadId: thread.id,
+            chapterId: t.chapterId,
+            kind: t.kind,
+            evidence: t.evidence ?? null,
+            source: `scan:${t.chapterId}`,
+          }),
+        );
+      }
+    }
+  });
+
+  return { ok: true, createdThreads, createdTouches };
+}
+
 // Facts extracted from a given chapter (source 'extraction:<chapterId>').
 export function extractedFacts(db: Db, chapterId: number): CanonFact[] {
   return db

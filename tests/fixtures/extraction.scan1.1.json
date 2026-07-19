@@ -1,0 +1,3 @@
+{
+  "text": "{\n  \"threads\": [\n    {\n      \"thread\": \"Ledger mystery\",\n      \"isNew\": false,\n      \"type\": \"mystery\",\n      \"kind\": \"advance\",\n      \"evidence\": \"the ledger surfaced in the ash\"\n    },\n    {\n      \"thread\": \"Theo and Mara\",\n      \"isNew\": true,\n      \"type\": \"relationship\",\n      \"kind\": \"advance\",\n      \"evidence\": \"he lingered at her door a moment too long\"\n    }\n  ]\n}"
+}

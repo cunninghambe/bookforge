@@ -181,6 +181,58 @@ Return ONLY a JSON object with this exact shape, and nothing else:
 Use an empty array for facts, states, or threads if there are none. Do not use em-dashes anywhere. No prose outside the JSON.`;
 }
 
+// Thread backfill scan for one locked chapter (Amendment A17). A sibling of
+// extractionPrompt that reuses its threads-section contract text, but asks ONLY
+// for thread touches (the scan is about threads, not facts or states). The prompt
+// carries the chapter's locked text and summary, the book's existing OPEN THREADS
+// as attach targets, and the thread names ALREADY PROPOSED earlier in this run, so
+// a recurring line (chapter 7's "Theo and Mara") reuses the same name as chapter
+// 2's instead of duplicating. The reply contract is exactly the A12 threads
+// section, so parseExtractionResponse reads it unchanged (a missing facts/states
+// key parses as empty).
+export function scanThreadsPrompt(args: {
+  chapterTitle: string;
+  chapterNumber: number;
+  text: string;
+  summary: string | null;
+  openThreads: string[]; // the book's existing open threads (attach targets)
+  proposedThisRun: string[]; // thread names already proposed earlier in this run
+}): string {
+  const threads = args.openThreads.length
+    ? args.openThreads.map((t) => `- ${t}`).join("\n")
+    : "(none open yet)";
+  const proposed = args.proposedThisRun.length
+    ? args.proposedThisRun.map((t) => `- ${t}`).join("\n")
+    : "(none proposed yet in this scan)";
+  const summary = args.summary && args.summary.trim() ? args.summary.trim() : "(no summary)";
+  return `You are scanning a locked chapter of a novel to recover the standing story threads it touches: the arcs, mysteries, promises, and relationships running through the book. This chapter was written before threads were tracked, so its touches were never recorded. Read the chapter and propose which threads it advances, complicates, pays off, or mentions.
+
+When the chapter touches one of the OPEN THREADS listed below, reuse that thread's exact name and set isNew to false, so the touch attaches to the existing thread instead of duplicating it. When it touches a thread you ALREADY PROPOSED earlier in this scan, reuse that exact name too, so a recurring line is one thread across chapters rather than many. Only propose a new thread (isNew true, with a type) for a genuinely new arc, mystery, promise, or relationship. Do NOT invent threads for incidental beats.
+
+CHAPTER ${args.chapterNumber}
+Title: ${args.chapterTitle}
+
+SUMMARY
+${summary}
+
+TEXT
+${args.text}
+
+OPEN THREADS
+${threads}
+
+ALREADY PROPOSED THIS SCAN
+${proposed}
+
+Return ONLY a JSON object with this exact shape, and nothing else:
+{
+  "threads": [
+    { "thread": "the thread name", "isNew": true, "type": "arc | mystery | promise | relationship", "kind": "advance | complicate | payoff | mention", "evidence": "a short verbatim quote from the text" }
+  ]
+}
+Use an empty array if the chapter touches no threads. Do not use em-dashes anywhere. No prose outside the JSON.`;
+}
+
 // Consistency sweep for one locked chapter. A4.1 splits the prompt so the locked
 // canon (identical for every chapter in a run) is a cacheable shared prefix and
 // only the per-chapter text is the variable remainder. sweepPrefix builds the
