@@ -639,3 +639,32 @@ Scope and rules:
 Testing: a Playwright mobile project (iPhone-class viewport, 390x844) runs a core-flow subset: login, home, canon list and add, open a chapter, palette open then search then navigate, threads page renders with a swipeable braid, listen page controls. Key pages assert no horizontal body scroll (scrollWidth within viewport width; the braid scrolls inside its own container). The full desktop suite runs unchanged and must stay green.
 
 Acceptance check: on a real phone against the deployed app: log in, find a chapter via the palette, read it, play it, speak a note, and see the comment in review, all without pinch-zooming or horizontal body scrolling; on desktop, screenshots before and after this amendment are visually identical except where a window is actually narrow.
+
+### A16 (2026-07-18): Multiple series, and creating books
+
+Purpose: the data model assumed exactly one series. The author wants to start books that do NOT share the trilogy's world: today series-wide canon (project_id NULL) injects into every book's prompts, the character roster is global, and there is no way to create a book at all (the three were seeded). This amendment introduces series as a first-class entity, scopes everything that was implicitly series-wide, and adds calm creation flows for both series and books. The approval gates, drafting, revision, sweep, threads, listen, and search behaviors do not change; they gain a boundary.
+
+Data model (idempotent migration, existing patterns):
+- New table `series`: id, title TEXT NOT NULL, order_index INTEGER NOT NULL, created_at.
+- `projects` gains `series_id` (guarded ALTER, NOT NULL semantics enforced in code); `canon_facts`, `characters`, and `threads` gain `series_id` the same way. `project_id NULL` on canon and threads now means "series-wide WITHIN that fact's series", never global.
+- Migration backfill: create one series titled "The Trilogy" (title editable) and assign every existing project, canon fact, character, and thread to it. After migration, an existing chapter's assembled prompt must be byte-identical to before the migration (this is the load-bearing acceptance check: the trilogy must not notice A16 happened).
+- Seed style rules: on CREATING a new series, the five seed style rules are COPIED into it as locked series-wide style_rule facts (source 'seed'), so every series starts with the author's standing style contract but can retire or edit its copy independently. The em-dash rule is repo law regardless.
+
+Scoping sweep (mechanical, complete):
+- Assembler, interrogation, sweep, chat context, bible importer, and extraction open-thread listing: every query that read "project X plus series-wide (project_id NULL)" now reads "project X plus series-wide within X's series". Characters available to a book (appearing-character matching, chat, state timelines, extraction character mapping) are the book's series' characters only.
+- Search: search_index rows gain a series id (unindexed column, populated by the triggers and rebuild). Default palette search stays global across all series (finding things is the point); the existing projectId scope narrows as today; the API and MCP search gain an optional seriesId filter.
+- Threads: the braid and threads APIs already take a projectId; series-wide threads belong to the book's series. The A12 rule that a series-wide thread hit deep-links to "the first book" becomes "the first book of ITS series".
+- Character pages: /characters lists by series with a series switcher (calm select, defaulting to the first series); character creation requires a series.
+
+Creation and renaming UI:
+- The home Books page groups books under series headings. Each series heading carries a quiet rename affordance; under each series a "New book" form (title only) appends a book to that series; at the bottom a "New series" form (title only) creates the series, copies the seed style rules, and creates its first book with a default title (editable), so the author lands ready to write.
+- Book titles become renameable from the home page (quiet affordance, same pattern).
+- Routes: POST /api/series, PATCH /api/series/[id] (title), POST /api/projects (title, seriesId), PATCH /api/projects/[id] (title). Simple validation in the canon route style.
+
+MCP (gate discipline unchanged): series_list, series_create, book_create (title plus seriesId), book_rename. canon_add and thread_create gain optional seriesId: required when projectId is omitted (a series-wide item must name its series), inferred from the project otherwise; omitting both is an error naming the fix. characters tools gain the series scope where they list or create. All tool-surface tests extend.
+
+Non-goals, recorded: no deleting or archiving of books or series (rename only; removal stays a manual database operation); no cross-series character sharing or moving (create the character in the other series); no per-series theming or settings; the settings page and model routing stay global.
+
+Testing: unit tests for the migration backfill (existing rows all land in series 1; running twice is a no-op), the byte-identical-prompt acceptance (assemble a chapter's prompt before and after migrate on a seeded fixture DB), every scoping seam (assembler, chat context, sweep, bible, extraction open-threads, characters listing, search triggers and filter, thread deep-link), creation routes, and the MCP tools including the seriesId rules. E2E: create a new series and a book in it through the UI; add a canon fact and a character to the new series; assert the new book's assembled prompt (dev inspector) contains none of the trilogy's series-wide canon or characters and DOES contain its own; assert the trilogy's own prompt is unchanged; palette finds content from both series; rename a series and a book and see both stick. The full existing suite passes unchanged.
+
+Acceptance check: on a database carrying the trilogy, migration files everything under one editable series and an existing chapter's assembled prompt is byte-identical; creating "New Series" plus its first book yields a book whose prompt contains the copied style rules, no trilogy world canon, and no trilogy characters; a character created in the new series never appears in trilogy surfaces; series-wide facts and threads stay inside their series everywhere (assembler, chat, sweep, braid, search scope filter); the author can do all of this from the home page without touching the database.
