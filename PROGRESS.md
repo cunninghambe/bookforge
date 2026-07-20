@@ -1959,3 +1959,15 @@ test note transcribed verbatim-perfectly into a correctly anchored comment
 rollback is an env revert documented in DEPLOY.md. No app code changed; 458
 unit tests confirmed untouched. See D164 and the on-host benchmark report
 at /opt/bookforge-voice/benchmark-report.txt with listening samples.
+---
+
+## Scene-break silence fix (2026-07-20)
+
+Field report from the first Kokoro listen: playback stopped at paragraph 7
+with a browser-pause message and a dead Play button; console showed 500s on
+paragraphs 7 and 17. Those are the scene-break separators ("---" as its own
+paragraph): Kokoro phonemizes them to nothing and throws. The adapter now
+returns a short silence for unvoiceable text (the natural sound of a scene
+break) and the player turns a source-load failure into an explicit Retry
+instead of the misleading pause message. 458 unit and a14 e2e green. See
+D165.

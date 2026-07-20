@@ -47,6 +47,12 @@ export function ListenPlayer({
   // stall). The UI flips to Play with a visible nudge instead of claiming to
   // play silence.
   const [needsResume, setNeedsResume] = useState(false);
+  // Set when the audio element failed to LOAD its source (a server 500 on the
+  // paragraph, a dropped connection). Distinct from needsResume: tapping Play
+  // cannot help until the source is refetched, so the UI offers Retry, which
+  // reloads the element (field bug: a failed paragraph showed the browser
+  // pause message and Play did nothing).
+  const [loadError, setLoadError] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
   const indexRef = useRef(0);
   indexRef.current = index;
@@ -193,8 +199,16 @@ export function ListenPlayer({
         onEnded={onEnded}
         onWaiting={() => setBuffering(true)}
         onStalled={() => setBuffering(true)}
-        onCanPlay={() => setBuffering(false)}
+        onCanPlay={() => {
+          setBuffering(false);
+          setLoadError(false);
+        }}
         onPlaying={() => setBuffering(false)}
+        onError={() => {
+          setBuffering(false);
+          setPlaying(false);
+          setLoadError(true);
+        }}
         onLoadedData={() => {
           if (audioRef.current) audioRef.current.playbackRate = rate;
         }}
@@ -209,10 +223,30 @@ export function ListenPlayer({
           Synthesizing paragraph {index + 1}... audio resumes automatically.
         </p>
       )}
-      {needsResume && (
+      {needsResume && !loadError && (
         <p data-testid="listen-resume-note" className="text-sm text-warn-ink">
           Playback paused by the browser. Tap Play to continue.
         </p>
+      )}
+      {loadError && (
+        <div data-testid="listen-load-error" className="text-center text-sm">
+          <p className="text-danger-ink">
+            Paragraph {index + 1} could not be loaded.
+          </p>
+          <button
+            type="button"
+            data-testid="listen-retry"
+            onClick={() => {
+              setLoadError(false);
+              setNeedsResume(false);
+              audioRef.current?.load();
+              setPlaying(true);
+            }}
+            className="btn-secondary mt-2 px-4 py-1.5"
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       <div className="flex items-center gap-4">

@@ -2076,6 +2076,20 @@ overwrite existing process env, so an env-file change requires sourcing the
 file into the shell before pm2 restart --update-env. Rollback is the env
 backup plus restart; nothing else changes.
 
+### D165: Unspeakable paragraphs synthesize as silence; a failed load offers Retry
+
+Field failure on the first Kokoro listen: the chapter's scene-break
+separators (a bare "---" is its own paragraph) phonemize to zero segments,
+the Kokoro runtime throws, the adapter 500d, and the player showed the
+misleading browser-pause message with a Play button that could not help.
+Two fixes. The adapter answers text with nothing voiceable (and any
+synthesis yielding zero samples) with 0.8 seconds of silence at the model
+rate: a beat of quiet is exactly what a scene break should sound like, and
+the /speak contract stays total. The player distinguishes a LOAD failure
+from a browser-blocked play: an audio element error now pauses honestly and
+offers Retry (which reloads the element and resumes), instead of a resume
+nudge that cannot work until the source refetches.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

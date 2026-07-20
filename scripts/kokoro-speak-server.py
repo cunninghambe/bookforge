@@ -61,14 +61,11 @@ _kokoro = Kokoro(MODEL_PATH, VOICES_PATH)
 _synth_lock = threading.Lock()
 
 
-def synth_wav(text):
-    """Synthesize text to a complete 16-bit PCM WAV byte string."""
-    with _synth_lock:
-        samples, sample_rate = _kokoro.create(
-            text, voice=VOICE, speed=SPEED, lang=LANG
-        )
-    pcm = np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0)
-    pcm = (pcm * 32767.0).astype("<i2")
+SILENCE_SECONDS = 0.8
+FALLBACK_RATE = 24000  # Kokoro's native output rate.
+
+
+def _pcm_to_wav(pcm, sample_rate):
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav:
         wav.setnchannels(1)
@@ -76,6 +73,40 @@ def synth_wav(text):
         wav.setframerate(int(sample_rate))
         wav.writeframes(pcm.tobytes())
     return buf.getvalue()
+
+
+def _silence_wav(sample_rate=FALLBACK_RATE, seconds=SILENCE_SECONDS):
+    frames = int(sample_rate * seconds)
+    return _pcm_to_wav(np.zeros(frames, dtype="<i2"), sample_rate)
+
+
+def _speakable(text):
+    """True when the text contains anything the phonemizer can voice."""
+    return any(ch.isalnum() for ch in text)
+
+
+def synth_wav(text):
+    """Synthesize text to a complete 16-bit PCM WAV byte string.
+
+    Text with nothing voiceable (a scene-break separator like a bare "---"
+    arrives as its own paragraph) phonemizes to zero segments and makes the
+    runtime throw ("need at least one array to concatenate"), so it is
+    answered with a short silence instead: a beat of quiet is exactly what a
+    scene break should sound like. The same fallback covers a synthesis that
+    unexpectedly yields no samples.
+    """
+    if not _speakable(text):
+        return _silence_wav()
+    with _synth_lock:
+        samples, sample_rate = _kokoro.create(
+            text, voice=VOICE, speed=SPEED, lang=LANG
+        )
+    arr = np.asarray(samples, dtype=np.float32)
+    if arr.size == 0:
+        return _silence_wav()
+    pcm = np.clip(arr, -1.0, 1.0)
+    pcm = (pcm * 32767.0).astype("<i2")
+    return _pcm_to_wav(pcm, sample_rate)
 
 
 def extract_text(body, content_type):
