@@ -2058,6 +2058,24 @@ untouched: resolution still requires every unauthorized hunk decided through
 the resolve route. New unit coverage for newestPendingRevisionForDraft and
 an e2e that reloads mid-resolution and resolves from the restored state.
 
+## Amendment A19: better voices, same contracts
+
+### D164: The flip is an env change gated by a measured realtime factor
+
+Kokoro-82M behind a repo-owned adapter (scripts/kokoro-speak-server.py,
+Piper's exact /speak contract, loopback bind, body cap) benchmarked on three
+real Chapter One paragraphs at median RTF 0.509 (long 0.509, mid 0.494, short
+dialogue 0.635), comfortably under the 1.0 gate, so both env vars flipped
+(TTS to the Kokoro service on 3110, STT to a second whisper.cpp instance
+running large-v3-turbo q5 on 3111; the shared autogeny services untouched on
+their original ports). AUDIO_VOICE_ID moved to kokoro-af_heart so the
+content-addressed cache re-keys: old Piper audio ages out of the size cap and
+chapters re-synthesize in the new voice on next listen. Deployment gotcha
+recorded in DEPLOY.md: pm2 bakes env at first start and Next does not
+overwrite existing process env, so an env-file change requires sourcing the
+file into the shell before pm2 restart --update-env. Rollback is the env
+backup plus restart; nothing else changes.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

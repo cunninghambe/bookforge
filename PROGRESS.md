@@ -1944,3 +1944,18 @@ deterministically recomputed hunks, the review page loads it on mount with
 a restored banner, and a dropped revise() connection auto-recovers. 458
 unit tests; phase4 e2e green including the new reload-restore regression.
 See D163.
+---
+
+## Amendment A19: Better voices, same contracts (2026-07-20)
+
+Status: COMPLETE and LIVE. Kokoro-82M (af_heart) now voices Listen via a
+repo-owned adapter service, benchmark-gated at median realtime factor 0.509
+on real Chapter One paragraphs (the warm-ahead pipeline outruns playback
+roughly two to one); voice notes transcribe through a second whisper.cpp
+instance running large-v3-turbo q5. Live verification: fresh Kokoro opus
+served through the app (7.8s of audio synthesized in 4.1s) and a spoken
+test note transcribed verbatim-perfectly into a correctly anchored comment
+(cleaned up after). The autogeny Piper and base.en services are untouched;
+rollback is an env revert documented in DEPLOY.md. No app code changed; 458
+unit tests confirmed untouched. See D164 and the on-host benchmark report
+at /opt/bookforge-voice/benchmark-report.txt with listening samples.

@@ -262,3 +262,98 @@ uploaded `static/**/*.js.map` files after ALL uploads succeed (never on
 partial failure), and symbolication is unaffected because the uh-oh server
 keeps its own copies. The `.js` chunks retain `sourceMappingURL` comments
 pointing at now-404 URLs, which is harmless.
+
+## Better voices (A19): Kokoro TTS and whisper turbo STT
+
+The listen and voice-note features (A14) talk to two on-box loopback services
+behind `TTS_SERVICE_URL` and `STT_SERVICE_URL`. A19 upgrades the models without
+touching a service contract: two new services on new ports, then an env flip.
+Both live under `/opt/bookforge-voice/` and run under pm2, supervised like the
+app. The original Piper (3108) and whisper base.en (3107) services stay running
+and untouched, so the flip is reversible by env alone.
+
+Kokoro TTS (`bookforge-kokoro`, 127.0.0.1:3110). A Python venv with `kokoro-onnx`
+runs `scripts/kokoro-speak-server.py` (copied from this repo), which serves the
+exact Piper contract (`GET /health` -> `{"ok":true,"voiceLoaded":true}`, `POST
+/speak` JSON `{"text"}` -> WAV). Default voice `af_heart`, overridable with
+`KOKORO_VOICE`; model and voices paths come from `KOKORO_MODEL_PATH` and
+`KOKORO_VOICES_PATH` (the `kokoro-v1.0.onnx` model and `voices-v1.0.bin` pack, in
+`/opt/bookforge-voice/models/`).
+
+```
+python3 -m venv /opt/bookforge-voice/venv
+/opt/bookforge-voice/venv/bin/pip install kokoro-onnx onnxruntime numpy
+KOKORO_PORT=3110 KOKORO_VOICE=af_heart \
+KOKORO_MODEL_PATH=/opt/bookforge-voice/models/kokoro-v1.0.onnx \
+KOKORO_VOICES_PATH=/opt/bookforge-voice/models/voices-v1.0.bin \
+  pm2 start /opt/bookforge-voice/venv/bin/python \
+  --name bookforge-kokoro --interpreter none -- \
+  /opt/bookforge-voice/kokoro-speak-server.py
+pm2 save
+```
+
+Whisper turbo STT (`bookforge-whisper`, 127.0.0.1:3111). Reuses the whisper.cpp
+binary already on the box with a larger, quantized model
+(`ggml-large-v3-turbo-q5_0.bin` in `/opt/bookforge-voice/models/`). The existing
+autogeny whisper instance (3107, base.en) is left byte-for-byte as is.
+
+```
+pm2 start /root/autogeny-os/apps/desktop/src-tauri/binaries/whisper-server-x86_64-unknown-linux-gnu \
+  --name bookforge-whisper --interpreter none -- \
+  --port 3111 --model /opt/bookforge-voice/models/ggml-large-v3-turbo-q5_0.bin
+pm2 save
+```
+
+Benchmark gate (before any TTS flip). Kokoro is heavier than Piper, so the flip
+is gated on a measured realtime factor (synthesis seconds / audio seconds) over
+three representative Chapter One paragraphs. Median at or below 1.0: flip.
+Between 1.0 and 1.5: hold and report the numbers (author's tradeoff). Above 1.5:
+hold and report. The run and its decision live in
+`/opt/bookforge-voice/benchmark-report.txt`, with kept WAV samples for a listen.
+The STT upgrade needs no gate beyond a functional round-trip and may flip on its
+own.
+
+Env flip (only for whichever half passed). In `/root/bookforge/.env.local`:
+
+```
+TTS_SERVICE_URL=http://127.0.0.1:3110
+STT_SERVICE_URL=http://127.0.0.1:3111
+AUDIO_VOICE_ID=kokoro-af_heart
+```
+
+Then back up and restart, picking up the new env. Re-source `.env.local` into
+the shell before the restart so `--update-env` actually reasserts the edited
+values: pm2 captured the original URLs at first start and Next.js does not
+overwrite a var already present in the process environment, so a bare
+`pm2 restart --update-env` from a fresh shell would keep serving the old ports.
+
+```
+cd /root/bookforge
+node scripts/backup.mjs
+set -a; . ./.env.local; set +a
+pm2 restart bookforge --update-env
+```
+
+`AUDIO_VOICE_ID` namespaces the content-addressed audio cache, so bumping it to
+`kokoro-af_heart` means old Piper audio simply ages out of the cache cap and each
+chapter re-synthesizes in the new voice on next listen (no manual purge).
+
+Rollback (env only, nothing else changes). Restore the two URLs (and the voice
+id) to the Piper/base.en values, back up, and restart:
+
+```
+TTS_SERVICE_URL=http://127.0.0.1:3108
+STT_SERVICE_URL=http://127.0.0.1:3107
+AUDIO_VOICE_ID=default
+```
+
+```
+cd /root/bookforge
+node scripts/backup.mjs
+set -a; . ./.env.local; set +a
+pm2 restart bookforge --update-env
+```
+
+The Kokoro and whisper-turbo pm2 services can keep running after a rollback (they
+are idle once the env points away from them) or be stopped with `pm2 delete
+bookforge-kokoro bookforge-whisper && pm2 save`.
