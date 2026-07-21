@@ -2090,6 +2090,68 @@ from a browser-blocked play: an audio element error now pauses honestly and
 offers Retry (which reloads the element and resumes), instead of a resume
 nudge that cannot work until the source refetches.
 
+## Amendment A20: bible import restructure
+
+### D166: the 500 was the bible call's output exceeding the transport's per-call token cap
+
+Reproduced on the deployment box before restructuring. The bible extraction call for
+a 24,000-char chunk asks the model for a large structured JSON reply; measured on the
+box with the exact prompt, dense bible content produces about 0.9 output tokens per
+input character, so one chunk wants 12,000 to 15,000 output tokens. The running app
+uses the claude-code transport, whose ClaudeCodeClient never forwards the call's
+maxTokens to the CLI; the effective output cap is instead the process environment's
+CLAUDE_CODE_MAX_OUTPUT_TOKENS, which pm2 baked at 2048 (in /root/.pm2/dump.pm2). When
+a reply exceeds that cap the CLI returns is_error with "API Error: Claude's response
+exceeded the 2048 output token maximum" rather than a partial result; parseCliResult
+throws a transient ClaudeCodeError, withRetry runs it a second time, and each attempt
+takes about three minutes (the CLI internally iterates to 8,192 tokens before giving
+up), so the two attempts total the observed ~418 seconds and the unguarded route
+returns 500. It is NOT a Next route timeout and NOT a response-size limit: the
+request completed at the app level and returned 500. Restructuring alone does not fix
+this (each per-chunk call would still exceed 2048); the binding fix is smaller chunks
+(D168), so each request's output stays under the cap on the box as configured.
+
+### D167: plan call plus one request per chunk, the scan/sweep shape applied verbatim
+
+POST /api/bible/import now only PLANS: it validates the pasted text, splits it with
+chunkBible, and returns the chunk texts and count (no model call, no DB access). A
+new POST /api/bible/import/chunk runs exactly ONE chunk (one model call, purpose
+"bible", logged) and returns that chunk's proposals and any parse failure. The
+single-chunk step is extracted as importBibleChunk, exactly as runScan delegates to
+scanChapter and runSweep to sweepChapter; runBibleImport keeps looping over it, so
+its behavior and the fixture path are unchanged and the shared engine stays covered.
+The dedup context (locked canon plus roster, series-scoped per A16) is rebuilt per
+request by bibleDedupContext, byte-identical to the context runBibleImport builds
+once, so the prompt bytes match across a run. BibleImportPanel drives the loop
+client-side: plan, then one request per chunk with live progress ("Reading chunk 3
+of 40"), a per-chunk parse or model-call failure carried into the existing raw-text
+surface (A2.2) while the loop continues, and every chunk's proposals merged into the
+one approval checklist exactly as before. A thrown model call becomes the chunk's
+parseFailure inside importBibleChunk, never a throw, so an outlier dense chunk that
+still exceeds the cap surfaces as one recoverable failed chunk rather than a 500. The
+gated POST /api/bible/approve and the keyboard-and-tap approval are untouched:
+nothing lands unapproved. There is no bible MCP tool, so no MCP surface changes.
+Per-position fixture routing is preserved (bibleChunkFixtureKey: a single chunk uses
+the base key, multiple chunks suffix the 1-based position), so the existing bible
+fixture drives the new flow and the a3 e2e passes unchanged; it asserts the UI and DB
+outcomes, not the single-request transport, so no spec was adjusted.
+
+### D168: the chunk cap drops from 24,000 to 2,000 characters, justified by measurement
+
+DEFAULT_BIBLE_CHUNK_CHARS drops from 24,000 to 2,000; chunkBible's paragraph-boundary
+behavior is unchanged. Measured on the box with the exact extraction prompt: a
+pathologically dense 2,243-char sample returned 2,049 output tokens (0.91 tok/char,
+right at the cap), while ordinary bible prose returned about 0.39 tok/char, and the
+author's real bible sits near 0.55 (its whole was six 24k calls of 12 to 15k tokens).
+At 2,000 characters even the dense ceiling stays near 1,800 output tokens, safely
+under the 2,048-token cap whose breach caused the 500, so a normal import runs chunk
+by chunk with no failed chunks; a single per-chunk call measured about 20 to 30
+seconds, far from any timeout. Smaller input also shortens every per-chunk output.
+The chunkBible unit tests are unaffected: the one test that depended on the default
+still yields two chunks because each of its 15,000-char paragraphs now exceeds the
+smaller cap and becomes its own chunk. The fixture-driven a3 e2e is single-chunk
+regardless of the cap.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

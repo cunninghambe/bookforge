@@ -100,6 +100,12 @@ export function BibleImportPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chunkCount, setChunkCount] = useState<number | null>(null);
+  // A20: the run is client-driven, one request per chunk, so this tracks which
+  // chunk is under way for live progress.
+  const [progress, setProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
 
   const [chars] = useState<CharacterOpt[]>(characters);
   const [facts, setFacts] = useState<FactRow[] | null>(null);
@@ -176,35 +182,89 @@ export function BibleImportPanel({
     setBusy(true);
     setError(null);
     setApprovedSummary(null);
-    const res = await fetch("/api/bible/import", {
+    setProgress(null);
+    const scopeVal = scope === "series" ? "series" : Number(scope);
+
+    // A20: PLAN the run first (no model call). This splits the bible into chunks and
+    // returns their texts; the loop below runs one request per chunk, so no HTTP
+    // request ever spans more than one model call (the old all-in-one request died
+    // as a 500 after minutes on a real bible). A whole-run failure here surfaces its
+    // reason; per-chunk failures below carry their own reason into the raw-text area.
+    const planRes = await fetch("/api/bible/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // A16: send the chosen scope so the dedup context is scoped to the target
-      // series (a book scope resolves to the book's series).
-      body: JSON.stringify({
-        text,
-        fixtureKey,
-        scope: scope === "series" ? "series" : Number(scope),
-      }),
+      body: JSON.stringify({ text, scope: scopeVal }),
     });
-    setBusy(false);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!planRes.ok) {
+      const data = (await planRes.json().catch(() => ({}))) as { error?: string };
       setError(data.error ?? "Import failed.");
+      setBusy(false);
       return;
     }
-    const data = (await res.json()) as ImportResponse;
-    setChunkCount(data.chunks);
-    setParseFailures(data.parseFailures ?? []);
+    const plan = (await planRes.json()) as { count: number; chunks: string[] };
+
+    // One request per chunk. Proposals from every chunk merge into the one approval
+    // checklist exactly as the single-request design did; a per-chunk parse or call
+    // failure lands in the raw-text surface (A2.2) while the loop carries on.
+    const accFacts: ImportResponse["facts"] = [];
+    const accChars: ImportResponse["characters"] = [];
+    const accStates: ImportResponse["states"] = [];
+    const accFailures: Array<{ chunk: number; error: string; raw: string }> = [];
+
+    for (let i = 0; i < plan.chunks.length; i += 1) {
+      setProgress({ current: i + 1, total: plan.count });
+      try {
+        const res = await fetch("/api/bible/import/chunk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // A16: send the chosen scope so the dedup context is scoped to the target
+          // series (a book scope resolves to the book's series). position and
+          // totalChunks preserve the bible fixture-routing rule: a single chunk uses
+          // the base key; multiple chunks suffix the 1-based position. The real
+          // client ignores fixtureKey.
+          body: JSON.stringify({
+            text: plan.chunks[i],
+            scope: scopeVal,
+            position: i + 1,
+            totalChunks: plan.count,
+            fixtureKey,
+          }),
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          const reason = data.error ?? `HTTP ${res.status}`;
+          accFailures.push({ chunk: i + 1, error: reason, raw: reason });
+          continue;
+        }
+        const data = (await res.json()) as {
+          facts: ImportResponse["facts"];
+          characters: ImportResponse["characters"];
+          states: ImportResponse["states"];
+          parseFailure: { chunk: number; error: string; raw: string } | null;
+        };
+        accFacts.push(...(data.facts ?? []));
+        accChars.push(...(data.characters ?? []));
+        accStates.push(...(data.states ?? []));
+        if (data.parseFailure) accFailures.push(data.parseFailure);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        accFailures.push({ chunk: i + 1, error: reason, raw: reason });
+      }
+    }
+
+    setProgress(null);
+    setBusy(false);
+    setChunkCount(plan.count);
+    setParseFailures(accFailures);
     setFacts(
-      (data.facts ?? []).map((f) => ({
+      accFacts.map((f) => ({
         type: f.type,
         content: f.content,
         approved: false,
       })),
     );
     setCharRows(
-      (data.characters ?? []).map((c) => {
+      accChars.map((c) => {
         const existing = matchCharacter(c.name);
         return {
           name: c.name,
@@ -220,7 +280,7 @@ export function BibleImportPanel({
       }),
     );
     setStates(
-      (data.states ?? []).map((s) => {
+      accStates.map((s) => {
         const existing = matchCharacter(s.character);
         return {
           character: s.character,
@@ -426,6 +486,7 @@ export function BibleImportPanel({
               setParseFailures([]);
               setError(null);
               setChunkCount(null);
+              setProgress(null);
             }}
             className="rounded border border-edge px-4 py-1.5 text-sm"
           >
@@ -436,7 +497,9 @@ export function BibleImportPanel({
 
       {busy && !hasResult && (
         <p data-testid="bible-progress" className="mt-2 text-sm text-info-ink">
-          Reading the bible in order...
+          {progress
+            ? `Reading chunk ${progress.current} of ${progress.total}...`
+            : "Reading the bible in order..."}
         </p>
       )}
 

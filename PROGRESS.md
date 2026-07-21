@@ -1971,3 +1971,21 @@ returns a short silence for unvoiceable text (the natural sound of a scene
 break) and the player turns a source-load failure into an explicit Retry
 instead of the misleading pause message. 458 unit and a14 e2e green. See
 D165.
+---
+
+## Amendment A20: Bible import, one model call per request (2026-07-21)
+
+Status: COMPLETE. The A17/A18 restructuring applied to the series-bible
+importer after it 500d on a real 130K bible in production. Diagnosis (D166):
+the true cause was the claude-code transport's output cap
+(CLAUDE_CODE_MAX_OUTPUT_TOKENS on the box) being exceeded by the bible's
+12,000 to 15,000 token reply, which the CLI now returns as a hard error;
+each 24K chunk wanted far more than the cap and the unguarded route
+surfaced the retry as a 500. Fix: DEFAULT_BIBLE_CHUNK_CHARS dropped 24,000
+to 2,000 so each chunk's output stays well under the cap, plus a plan
+endpoint and a per-chunk endpoint with a client-driven loop in
+BibleImportPanel (live progress, per-chunk parse-failure carry-through,
+merged checklist, gated approval all unchanged). runBibleImport keeps
+delegating to the extracted importBibleChunk so its tests and the fixture
+path hold. 458 to 469 unit tests; a3 e2e green unchanged; full suite green.
+See D166 through D168.
