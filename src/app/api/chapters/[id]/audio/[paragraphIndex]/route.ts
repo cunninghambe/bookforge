@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string; paragraphIndex: string }> };
 // GET a single paragraph's audio. Serves from the content-addressed cache on a hit;
 // on a miss it synthesizes via the TTS bridge, transcodes to the serving format
 // when ffmpeg is present, caches, and serves. 404s when TTS is not configured or
-// the paragraph index is out of range.
+// the paragraph index is out of range; 502s when the TTS service fails.
 export async function GET(_req: Request, ctx: Ctx) {
   if (!ttsEnabled()) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -37,7 +37,15 @@ export async function GET(_req: Request, ctx: Ctx) {
   let bytes = readCached(key, ext);
   let serveType = contentType;
   if (!bytes) {
-    const wav = await synthesizeSpeech(text);
+    let wav: Buffer;
+    try {
+      wav = await synthesizeSpeech(text);
+    } catch (err) {
+      return NextResponse.json(
+        { error: `TTS error: ${(err as Error).message}` },
+        { status: 502 },
+      );
+    }
     if (ext === "opus") {
       try {
         bytes = await transcodeWavToOpus(wav);
