@@ -7,6 +7,7 @@ import { splitParagraphs } from "@/lib/audio/paragraphs";
 import { cacheKey, readCached, writeCached } from "@/lib/audio/cache";
 import { detectFfmpeg, chooseAudioFormat, transcodeWavToOpus } from "@/lib/audio/ffmpeg";
 import { synthesizeSpeech } from "@/lib/audio/tts";
+import { stripEmphasis } from "@/lib/markdown";
 
 type Ctx = { params: Promise<{ id: string; paragraphIndex: string }> };
 
@@ -30,7 +31,11 @@ export async function GET(_req: Request, ctx: Ctx) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  const text = paragraphs[index];
+  // A21: emphasis is display-only. Paragraph SPLITTING stays on the raw content
+  // (indices and voice-note anchoring are unchanged), but the text handed to the
+  // synthesizer and used for the cache key is the marker-stripped text, derived
+  // once here so the spoken audio and its cache key can never diverge.
+  const text = stripEmphasis(paragraphs[index]);
   const key = cacheKey(text, voiceId());
   const { ext, contentType } = chooseAudioFormat(await detectFfmpeg());
 

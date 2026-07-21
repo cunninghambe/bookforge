@@ -1989,3 +1989,21 @@ merged checklist, gated approval all unchanged). runBibleImport keeps
 delegating to the extracted importBibleChunk so its tests and the fixture
 path hold. 458 to 469 unit tests; a3 e2e green unchanged; full suite green.
 See D166 through D168.
+---
+
+## Amendment A21: Markdown emphasis (2026-07-21)
+
+Status: COMPLETE. The imported manuscript uses markdown emphasis
+(*italic*, **bold**); bookforge showed the literal asterisks on the review
+surface and the TTS voiced them. Fixed as a display-only concern: a pure
+parseEmphasis/stripEmphasis pair (src/lib/markdown.ts). The review surface
+renders segments as em/strong inside data-raw-start spans; a new
+selection-to-raw-offset mapping keeps comment quotedText byte-identical to
+the pre-A21 single-text-node behavior, so comment anchoring and the
+revision findSpan/patch offsets stay on raw content untouched (proven: the
+phase4/phase5 comment+revision e2e stay green, and a new a21 test flags and
+revises a span in a draft that also contains emphasis elsewhere). The TTS
+route and manifest key on stripEmphasis(paragraph) in one place, so
+paragraphs re-synthesize once without markers. The draft editor and the
+Markdown export stay raw markdown by design. 469 to 482 unit tests; 4 new
+a21 e2e; full clean-DB suite 57 green. See D169 through D173.

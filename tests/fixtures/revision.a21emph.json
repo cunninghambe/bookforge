@@ -1,0 +1,5 @@
+{
+  "text": "{\"patches\":[{\"original\":\"the word aloud\",\"replacement\":\"the name softly\"}],\"consistency_fixes\":[]}",
+  "inputTokens": 120,
+  "outputTokens": 24
+}

@@ -2152,6 +2152,73 @@ still yields two chunks because each of its 15,000-char paragraphs now exceeds t
 smaller cap and becomes its own chunk. The fixture-driven a3 e2e is single-chunk
 regardless of the cap.
 
+## Amendment A21: markdown emphasis
+
+### D169: emphasis is a display and audio concern only; the stored content stays raw markdown
+
+parseEmphasis (src/lib/markdown.ts) turns raw content into ordered segments
+{ text, kind, rawStart }, where text is the visible text with markers removed and
+rawStart is the raw offset of that visible text's first character (past any leading
+marker). stripEmphasis is the concatenation of those segments' visible text, so the
+rendered surface and the spoken text derive from one segmentation and can never
+disagree. The draft is never rewritten: the draft editor still edits raw markdown,
+export still emits it, and every offset the app computes (comment quotedText and
+spans, revision findSpan, voice-note paragraph anchoring) stays on the raw content
+exactly as before. Bold is ** or __, italic is * or _; a marker with no matching
+close, a space just inside the open or the close, or a lone marker is literal, never
+a broken segment; the parser never throws and never drops or reorders a visible
+character. No markdown library was added: it is a small hand-rolled scanner for
+emphasis only.
+
+### D170: the review surface renders segments in data-raw-start spans and maps selections back to raw offsets
+
+ReviewEditor renders each segment as a <span data-raw-start={rawStart}> wrapping
+plain text, an <em>, or a <strong>, inside the existing whitespace-pre-wrap serif
+container, with no dangerouslySetInnerHTML. The selectionchange handler no longer
+sums text-node lengths across the prose (which would yield the marker-stripped
+offset); it resolves each endpoint's enclosing [data-raw-start] span and adds the
+offset within that span's visible text to the span's rawStart. Because a segment's
+visible text is a contiguous run of the raw input, this is exact, so
+quotedText = content.slice(lo, hi) is byte-identical to the pre-A21 single-text-node
+behavior: a selection inside an emphasized word yields the plain word, and a
+selection spanning a marker yields the raw substring including the marker. Comment
+save, revision diff, and highlight are therefore unchanged, which the phase4, phase5,
+and a4 suites confirm by running green unmodified.
+
+### D171: stripEmphasis is applied where synth text and cache key are derived, in the route and the manifest
+
+The per-paragraph audio route derives one stripped value from the raw paragraph and
+feeds it to both the cache key and synthesizeSpeech, so the spoken audio and its key
+cannot diverge. The manifest's cache-state probe keys on the same
+stripEmphasis(paragraph): the route now writes under the stripped key, so a probe on
+the raw key would always read as uncached. Paragraph splitting itself stays on the
+raw content (paragraphs.ts is untouched), so paragraph indices and voice-note
+anchoring are unchanged; only the text handed to TTS changes. Changing the keyed
+text re-keys the content-addressed cache, so each paragraph re-synthesizes once
+without its markers and the old marker-bearing audio ages out of the cap. The
+manifest's chars field stays the raw paragraph length, which is display only.
+
+### D172: underscores obey the intraword restraint, asterisks do not
+
+Asterisk emphasis is recognized intraword the way markdown allows (foo*bar*baz
+italicizes bar), but an underscore does not open or close emphasis when it sits
+against an alphanumeric character, so snake_case_name and file_name_here stay literal
+and are spoken verbatim rather than mangled into snakecasename. This is the standard
+markdown asymmetry and the only flanking rule the parser applies beyond the
+space-just-inside restraint, and it keeps technical tokens intact without pulling in
+a markdown library. Apostrophes and hyphens are not markers at all, so they are
+untouched throughout.
+
+### D173: the pending preview and stored comment quotes render through the same parser
+
+The selected-span preview and each existing comment's quoted text render through
+parseEmphasis (as <em>, <strong>, or plain text), so a marker never appears as
+literal text anywhere on the review surface. In the common case the stored quote is
+a clean word with no marker and renders as plain text; the shared parser matters only
+when a quote legitimately contains emphasis. The draft editor and the Markdown export
+are deliberately untouched (they show the raw asterisks, since the author edits and
+exports the source), and character chat is not affected.
+
 ## Deferred non-goals (from SPEC, not built)
 
 Image generation; multi-user/accounts beyond the shared password; story-arc

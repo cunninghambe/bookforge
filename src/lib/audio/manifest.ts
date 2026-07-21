@@ -1,5 +1,6 @@
 import { splitParagraphs } from "./paragraphs";
 import { cacheKey } from "./cache";
+import { stripEmphasis } from "../markdown";
 
 // The audio manifest for a chapter: the paragraph count, the serving format, and
 // per-paragraph cache state. The player reads it to render the position display
@@ -39,7 +40,10 @@ export function buildManifest(args: {
     paragraphs: paragraphs.map((text, index) => ({
       index,
       chars: text.length,
-      cached: args.probeCached(cacheKey(text, args.voiceId), args.ext),
+      // A21: the route keys audio on the marker-stripped paragraph, so the manifest
+      // must probe the same stripped key or a synthesized paragraph would always
+      // read as uncached. chars stays the raw paragraph length (display only).
+      cached: args.probeCached(cacheKey(stripEmphasis(text), args.voiceId), args.ext),
     })),
   };
 }

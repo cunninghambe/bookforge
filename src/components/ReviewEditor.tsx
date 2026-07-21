@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { LockPanel } from "./LockPanel";
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
 import { paragraphIndexForOffset } from "@/lib/audio/paragraphs";
+import { parseEmphasis } from "@/lib/markdown";
 
 const CONTROL_DELIM = "\n<<<BOOKFORGE_CTRL>>>\n";
 
@@ -55,18 +56,71 @@ interface PendingSelection {
   end: number;
 }
 
-// Offset of a node/offset pair within a root, summing the length of every text
-// node that precedes it. Works whether the prose is one text node or several.
-function offsetWithin(root: Node, node: Node, offset: number): number {
-  let total = 0;
-  const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let current = tw.nextNode();
-  while (current) {
-    if (current === node) return total + offset;
-    total += current.textContent?.length ?? 0;
-    current = tw.nextNode();
+// A21: map a DOM selection endpoint inside the prose to a RAW content offset. The
+// prose is rendered as emphasis segments, each wrapped in a `<span data-raw-start>`
+// carrying the raw offset of its first visible character (markers removed). A
+// segment's visible text is a contiguous run of the raw content, so the raw offset
+// of an endpoint is the enclosing span's rawStart plus the endpoint's offset within
+// that span's visible text. This keeps quotedText = content.slice(lo, hi) byte
+// identical to the pre-A21 single-text-node behavior. Returns null when the
+// endpoint is not inside a segment span (the caller then ignores the selection).
+function rawOffsetForEndpoint(
+  root: HTMLElement,
+  node: Node,
+  offset: number,
+): number | null {
+  // Resolve the enclosing [data-raw-start] span.
+  let span: HTMLElement | null = null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    span =
+      (node.parentElement?.closest("[data-raw-start]") as HTMLElement | null) ??
+      null;
+  } else if (node.nodeType === Node.ELEMENT_NODE) {
+    const el = node as Element;
+    const own = el.closest("[data-raw-start]") as HTMLElement | null;
+    if (own && root.contains(own)) {
+      span = own;
+    } else {
+      // The endpoint sits on the prose root or a wrapper: `offset` is a child
+      // index into the segment spans. Map it to a segment boundary.
+      const spans = root.querySelectorAll<HTMLElement>("[data-raw-start]");
+      if (spans.length === 0) return null;
+      if (offset >= spans.length) {
+        const last = spans[spans.length - 1];
+        return rawStartOf(last) + (last.textContent?.length ?? 0);
+      }
+      return rawStartOf(spans[Math.max(0, offset)]);
+    }
   }
-  return total;
+  if (!span || !root.contains(span)) return null;
+  const base = rawStartOf(span);
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    // `offset` is a child index within the span; sum the visible text before it.
+    const before = Array.from(node.childNodes).slice(0, offset);
+    const within = before.reduce(
+      (n, c) => n + (c.textContent?.length ?? 0),
+      0,
+    );
+    return base + within;
+  }
+
+  // Text-node endpoint: sum text-node lengths inside the span up to `node`, then
+  // add `offset`. There is one visible text node per segment, so this is exact.
+  let within = 0;
+  const tw = document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
+  let cur = tw.nextNode();
+  while (cur) {
+    if (cur === node) return base + within + offset;
+    within += cur.textContent?.length ?? 0;
+    cur = tw.nextNode();
+  }
+  return base + within;
+}
+
+function rawStartOf(span: HTMLElement): number {
+  const raw = Number(span.dataset.rawStart);
+  return Number.isFinite(raw) ? raw : 0;
 }
 
 export function ReviewEditor({
@@ -110,6 +164,10 @@ export function ReviewEditor({
 
   const unresolvedCount = comments.filter((c) => !c.resolved).length;
 
+  // A21: the raw content rendered as emphasis segments. Each segment is wrapped in
+  // a span carrying its raw offset so a selection maps back to raw content offsets.
+  const segments = useMemo(() => parseEmphasis(content), [content]);
+
   // Capture a text selection inside the prose so it survives clicking a button.
   useEffect(() => {
     function onSelectionChange() {
@@ -121,8 +179,9 @@ export function ReviewEditor({
       if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) {
         return;
       }
-      const start = offsetWithin(root, range.startContainer, range.startOffset);
-      const end = offsetWithin(root, range.endContainer, range.endOffset);
+      const start = rawOffsetForEndpoint(root, range.startContainer, range.startOffset);
+      const end = rawOffsetForEndpoint(root, range.endContainer, range.endOffset);
+      if (start === null || end === null) return;
       const lo = Math.min(start, end);
       const hi = Math.max(start, end);
       const quotedText = content.slice(lo, hi);
@@ -328,7 +387,17 @@ export function ReviewEditor({
           data-testid="review-prose"
           className="max-w-[70ch] whitespace-pre-wrap rounded border border-edge bg-surface p-4 font-serif text-[15px] leading-relaxed text-ink"
         >
-          {content}
+          {segments.map((seg, i) => (
+            <span key={i} data-raw-start={seg.rawStart}>
+              {seg.kind === "italic" ? (
+                <em>{seg.text}</em>
+              ) : seg.kind === "bold" ? (
+                <strong>{seg.text}</strong>
+              ) : (
+                seg.text
+              )}
+            </span>
+          ))}
         </div>
 
         <div className="mt-3 rounded border border-edge-soft p-3">
@@ -340,7 +409,7 @@ export function ReviewEditor({
               data-testid="selected-span"
               className="mb-2 rounded bg-warn px-2 py-1 text-sm text-warn-ink"
             >
-              {pending.quotedText}
+              <EmphasisText text={pending.quotedText} />
             </p>
           ) : (
             <p className="mb-2 text-sm text-faint">
@@ -583,7 +652,7 @@ export function ReviewEditor({
               }`}
             >
               <p className="mb-1 text-xs italic text-muted">
-                &ldquo;{c.quotedText}&rdquo;
+                &ldquo;<EmphasisText text={c.quotedText} />&rdquo;
               </p>
               <p className="mb-1">{c.comment}</p>
               {c.resolved ? (
@@ -626,5 +695,24 @@ export function ReviewEditor({
         />
       </aside>
     </div>
+  );
+}
+
+// A21: render a raw string as emphasis (plain / italic / bold) through the same
+// parser the review surface uses, so the pending-selection preview and the stored
+// comment quotes never show a literal emphasis marker.
+function EmphasisText({ text }: { text: string }) {
+  return (
+    <>
+      {parseEmphasis(text).map((seg, i) =>
+        seg.kind === "italic" ? (
+          <em key={i}>{seg.text}</em>
+        ) : seg.kind === "bold" ? (
+          <strong key={i}>{seg.text}</strong>
+        ) : (
+          <Fragment key={i}>{seg.text}</Fragment>
+        ),
+      )}
+    </>
   );
 }
