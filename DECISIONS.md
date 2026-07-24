@@ -2259,3 +2259,58 @@ interrogation, draft generation, sweep, import, export, character chat. Constrai
 carried over from the SPEC quality bar: extraction approval and revision hunk
 accept/reject stay human-only decisions; MCP may read proposals and reports but
 must not auto-approve either gate.
+
+### D174: The popover is additive; the static panel and every existing testid stay byte-identical
+
+The selection popover and inline composer are new elements with new testids
+(selection-toolbar, toolbar-comment-button, toolbar-suggest-button,
+inline-composer, inline-comment-input, inline-suggest-input, inline-note-input,
+inline-composer-submit). The static "Selected span" panel remains untouched as
+the fallback surface (it is also the phone flow, where floating popovers fight
+native selection handles). This keeps every existing e2e green without edits,
+per the test-preservation law.
+
+### D175: A suggestion is a comment row with non-null suggested_text; nullability is the discriminator
+
+No kind enum, no second table. The comments table gains one nullable
+suggested_text column by guarded ALTER (the D140 pattern). Suggestions share
+quoted-text-is-truth anchoring, the sidebar, resolution, and the lock gate with
+plain comments; they differ only in what consumes them. The revise prompt
+excludes them (a filtered sibling of listUnresolvedComments); the lock gate
+counts every unresolved row, so an unapplied suggestion still blocks locking.
+
+### D176: Suggestions apply mechanically, one transaction, one new draft version, no model call
+
+The author's exact replacement text needs no model. Apply anchors each
+unresolved suggestion via findSpan, skips unanchorable ones ("not found") and
+later overlapping ones ("overlap"), applies the rest in one transaction, and
+inserts exactly one new draft version. Skips are reported with reasons, the
+A2.2 pattern, and skipped suggestions stay unresolved. suggestedText is linted
+for em-dashes at creation (400), so apply cannot introduce one.
+
+### D177: On apply, resolved rows stay on their version; unresolved rows move to the new draft
+
+Applied suggestions are marked resolved and keep their draft_id (they record
+what was applied to which version). Every unresolved row, plain comments and
+skipped suggestions alike, has its draft_id updated in place to the new draft,
+so review continuity survives a mechanical apply. The existing rule that
+comments do not carry forward across an LLM revision is unchanged; that path
+still clears.
+
+### D178: Anchors are computed client-side with the server's own findSpan; decoration is a pure function
+
+No API change: the client imports the same pure findSpan the repo uses, so
+anchor positions can never disagree with the server's recomputation. Decoration
+lives in src/lib/reviewAnchors.ts as a pure function layered on parseEmphasis:
+it splits the A21 segments at anchor boundaries and tags each finer segment
+with its covering anchor ids. Every finer segment still carries a correct
+data-raw-start, so rawOffsetForEndpoint and selection capture are untouched.
+
+### D179: Single-key shortcuts are safe because the prose is read-only
+
+c (comment) and e (suggest) act only while a non-collapsed selection sits
+inside review-prose AND focus is outside any input, textarea, or
+contenteditable, so they can never eat typed text. Ctrl+Enter (Cmd on Mac)
+submits a composer, Escape cancels, clicking outside cancels. Toolbar buttons
+preventDefault on mousedown so the click does not collapse the selection it is
+acting on.
