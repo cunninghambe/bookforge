@@ -207,6 +207,12 @@ export function ReviewEditor({
   const [suggestionResult, setSuggestionResult] =
     useState<SuggestionResult | null>(null);
   const [flashedId, setFlashedId] = useState<number | null>(null);
+  // A22.4: shortcut reminders show the platform's own modifier (the SearchTrigger
+  // pattern); resolved in an effect so server and first client render agree.
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => {
+    setIsMac(/Mac/.test(navigator.userAgent));
+  }, []);
 
   const unresolvedCount = comments.filter((c) => !c.resolved).length;
   // A22: the revise button consumes only plain comments; the apply button consumes
@@ -794,17 +800,17 @@ export function ReviewEditor({
                     data-testid="toolbar-comment-button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => openComposer("comment")}
-                    className="rounded px-2 py-1 text-sm text-ink hover:bg-inset"
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-sm text-ink hover:bg-inset"
                   >
-                    Comment
+                    Comment <Kbd>c</Kbd>
                   </button>
                   <button
                     data-testid="toolbar-suggest-button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => openComposer("suggest")}
-                    className="rounded px-2 py-1 text-sm text-ink hover:bg-inset"
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-sm text-ink hover:bg-inset"
                   >
-                    Suggest edit
+                    Suggest edit <Kbd>e</Kbd>
                   </button>
                 </div>
               )}
@@ -859,7 +865,8 @@ export function ReviewEditor({
                   )}
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <span className="text-xs text-faint">
-                      Ctrl+Enter to save, Esc to cancel
+                      <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd> to save,{" "}
+                      <Kbd>Esc</Kbd> to cancel
                     </span>
                     <button
                       data-testid="inline-composer-submit"
@@ -875,6 +882,15 @@ export function ReviewEditor({
             </div>
           )}
         </div>
+
+        <p
+          data-testid="shortcut-hints"
+          className="mt-2 hidden text-xs text-faint sm:block"
+        >
+          Select a passage, then press <Kbd>c</Kbd> to comment or <Kbd>e</Kbd>{" "}
+          to suggest an edit. <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd>{" "}
+          saves, <Kbd>Esc</Kbd> cancels.
+        </p>
 
         <div className="mt-3 rounded border border-edge-soft p-3">
           <p className="mb-2 text-xs uppercase tracking-wide text-faint">
@@ -1200,6 +1216,15 @@ export function ReviewEditor({
         />
       </aside>
     </div>
+  );
+}
+
+// A22.4: a small key-cap chip for the on-screen shortcut reminders.
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="rounded border border-edge bg-inset px-1 font-sans text-[11px] text-muted">
+      {children}
+    </kbd>
   );
 }
 

@@ -2028,3 +2028,8 @@ untouched); clicking an anchor flashes its sidebar card. The static panel
 and every existing testid stay byte-identical. 482 to 504 unit tests; 6
 new a22 e2e (63 total); full clean-DB suite green (2 isolated-machine
 load flakes on a17/a2 reran green alone). See D174 through D179.
+
+Addendum (2026-07-24): on-screen shortcut reminders (D180). Key-cap chips
+on the toolbar buttons, platform-aware save/cancel hint in the composer,
+and a standing hint line under the prose (hidden on phones). 63 e2e still,
+with the a22 toolbar test strengthened to assert the reminders.

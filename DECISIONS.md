@@ -2314,3 +2314,14 @@ contenteditable, so they can never eat typed text. Ctrl+Enter (Cmd on Mac)
 submits a composer, Escape cancels, clicking outside cancels. Toolbar buttons
 preventDefault on mousedown so the click does not collapse the selection it is
 acting on.
+
+### D180: Shortcut reminders live on the surface, not only in muscle memory
+
+Field report follow-up to A22: the c and e shortcuts existed but nothing on
+screen said so. The toolbar buttons now carry key-cap chips (Comment c,
+Suggest edit e), the composer's save/cancel hint shows the platform's own
+modifier (Cmd on Mac, Ctrl elsewhere, resolved the SearchTrigger way in an
+effect so the server and first client render agree), and a quiet one-line
+reminder sits under the prose. That line is hidden below the sm breakpoint:
+on a phone there is no keyboard, so the reminder would be noise. One new
+testid (shortcut-hints); every pre-existing testid untouched.

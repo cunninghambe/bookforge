@@ -71,6 +71,16 @@ test.describe("Amendment A22: desk-first inline review", () => {
     await expect(page.getByTestId("selection-toolbar")).toBeVisible();
     await expect(page.getByTestId("toolbar-comment-button")).toBeVisible();
     await expect(page.getByTestId("toolbar-suggest-button")).toBeVisible();
+    // A22.4: the shortcuts are discoverable on screen, not only in muscle memory:
+    // key-cap chips on the toolbar buttons and a standing hint line under the prose.
+    await expect(
+      page.getByTestId("toolbar-comment-button").locator("kbd"),
+    ).toHaveText("c");
+    await expect(
+      page.getByTestId("toolbar-suggest-button").locator("kbd"),
+    ).toHaveText("e");
+    await expect(page.getByTestId("shortcut-hints")).toBeVisible();
+    await expect(page.getByTestId("shortcut-hints")).toContainText("Select a passage");
     // The static panel is still the fallback surface and captured the same span.
     await expect(page.getByTestId("selected-span")).toHaveText("gate stood open");
   });
