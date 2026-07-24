@@ -2325,3 +2325,15 @@ effect so the server and first client render agree), and a quiet one-line
 reminder sits under the prose. That line is hidden below the sm breakpoint:
 on a phone there is no keyboard, so the reminder would be noise. One new
 testid (shortcut-hints); every pre-existing testid untouched.
+
+### D181: The fallback composer moves into the sidebar
+
+Field report follow-up to A22: with the popover covering the in-context flow,
+the static "Selected span" panel and the shortcut reminder were dead weight
+pinned below the whole chapter, while the wide layout left the right column
+mostly empty. Both now sit at the top of the aside, beside the prose. Every
+testid is unchanged (the e2e suite locates them by testid, never by
+position); the only copy change is dropping the word "above" from the
+panel's empty-state line, which position made false. On phones the aside
+stacks below the prose as before, and the popover remains the primary
+composer there.

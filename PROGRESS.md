@@ -2033,3 +2033,6 @@ Addendum (2026-07-24): on-screen shortcut reminders (D180). Key-cap chips
 on the toolbar buttons, platform-aware save/cancel hint in the composer,
 and a standing hint line under the prose (hidden on phones). 63 e2e still,
 with the a22 toolbar test strengthened to assert the reminders.
+
+Addendum (2026-07-24): the fallback composer and shortcut reminder moved
+from below the prose into the top of the sidebar (D181). Testids unchanged.

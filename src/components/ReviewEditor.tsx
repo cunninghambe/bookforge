@@ -883,50 +883,6 @@ export function ReviewEditor({
           )}
         </div>
 
-        <p
-          data-testid="shortcut-hints"
-          className="mt-2 hidden text-xs text-faint sm:block"
-        >
-          Select a passage, then press <Kbd>c</Kbd> to comment or <Kbd>e</Kbd>{" "}
-          to suggest an edit. <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd>{" "}
-          saves, <Kbd>Esc</Kbd> cancels.
-        </p>
-
-        <div className="mt-3 rounded border border-edge-soft p-3">
-          <p className="mb-2 text-xs uppercase tracking-wide text-faint">
-            Selected span
-          </p>
-          {pending ? (
-            <p
-              data-testid="selected-span"
-              className="mb-2 rounded bg-warn px-2 py-1 text-sm text-warn-ink"
-            >
-              <EmphasisText text={pending.quotedText} />
-            </p>
-          ) : (
-            <p className="mb-2 text-sm text-faint">
-              Select text above to attach a comment.
-            </p>
-          )}
-          <textarea
-            aria-label="Comment"
-            data-testid="comment-input"
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            rows={2}
-            className="w-full rounded border border-edge p-2 text-sm"
-            placeholder="What should change about this span?"
-          />
-          <button
-            data-testid="add-comment-button"
-            onClick={addComment}
-            disabled={!pending || commentText.trim().length === 0}
-            className="mt-2 rounded bg-accent hover:bg-accent-hover px-3 py-1.5 text-sm text-accent-ink disabled:opacity-50"
-          >
-            Add comment
-          </button>
-        </div>
-
         {revising && (
           <div
             data-testid="revision-in-progress"
@@ -1110,6 +1066,52 @@ export function ReviewEditor({
       </div>
 
       <aside className="text-sm">
+        {/* A22.5: the fallback composer and the shortcut reminder live beside the
+            prose, not below it; the wide layout has the margin for them and the
+            popover already covers the in-context flow. */}
+        <p
+          data-testid="shortcut-hints"
+          className="mb-3 hidden text-xs text-faint sm:block"
+        >
+          Select a passage, then press <Kbd>c</Kbd> to comment or <Kbd>e</Kbd>{" "}
+          to suggest an edit. <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd>{" "}
+          saves, <Kbd>Esc</Kbd> cancels.
+        </p>
+
+        <div className="mb-4 rounded border border-edge-soft p-3">
+          <p className="mb-2 text-xs uppercase tracking-wide text-faint">
+            Selected span
+          </p>
+          {pending ? (
+            <p
+              data-testid="selected-span"
+              className="mb-2 rounded bg-warn px-2 py-1 text-sm text-warn-ink"
+            >
+              <EmphasisText text={pending.quotedText} />
+            </p>
+          ) : (
+            <p className="mb-2 text-sm text-faint">
+              Select text to attach a comment.
+            </p>
+          )}
+          <textarea
+            aria-label="Comment"
+            data-testid="comment-input"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            rows={2}
+            className="w-full rounded border border-edge p-2 text-sm"
+            placeholder="What should change about this span?"
+          />
+          <button
+            data-testid="add-comment-button"
+            onClick={addComment}
+            disabled={!pending || commentText.trim().length === 0}
+            className="mt-2 rounded bg-accent hover:bg-accent-hover px-3 py-1.5 text-sm text-accent-ink disabled:opacity-50"
+          >
+            Add comment
+          </button>
+        </div>
         {voiceNotesEnabled && (
           <div className="mb-4 rounded border border-edge-soft p-3">
             <p className="mb-2 text-xs uppercase tracking-wide text-faint">
