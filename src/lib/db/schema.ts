@@ -111,6 +111,11 @@ export const comments = sqliteTable("comments", {
   spanStart: integer("span_start"),
   spanEnd: integer("span_end"),
   comment: text("comment").notNull(),
+  // Amendment A22: a suggested edit is a comment row with non-null suggested_text
+  // (nullability is the discriminator, D175). NULL means a plain comment; a
+  // non-null value is the author's verbatim replacement, applied mechanically with
+  // no model call. Added via a guarded ALTER TABLE in migrate.ts.
+  suggestedText: text("suggested_text"),
   resolved: integer("resolved").default(0),
   createdAt: text("created_at").default(sql`(datetime('now'))`),
 });

@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import * as schema from "../db/schema";
 import { findSpan } from "../revision/spans";
@@ -21,6 +21,9 @@ export interface CreateCommentInput {
   comment: string;
   spanStart?: number | null;
   spanEnd?: number | null;
+  // A22: the author's verbatim replacement. Non-null makes this row a suggestion
+  // (D175); null (the default) is a plain comment.
+  suggestedText?: string | null;
 }
 
 export function createComment(db: Db, input: CreateCommentInput): CommentRow {
@@ -32,6 +35,7 @@ export function createComment(db: Db, input: CreateCommentInput): CommentRow {
       comment: input.comment,
       spanStart: input.spanStart ?? null,
       spanEnd: input.spanEnd ?? null,
+      suggestedText: input.suggestedText ?? null,
       resolved: 0,
     })
     .returning()
@@ -61,6 +65,9 @@ export function listComments(
   return rows.map((r) => withRecomputedSpan(r, draftContent));
 }
 
+// Every unresolved row on the draft, plain comments and suggestions alike. The
+// lock gate counts these (an unapplied suggestion still blocks locking, D175), so
+// this must keep counting everything.
 export function listUnresolvedComments(db: Db, draftId: number): CommentRow[] {
   return db
     .select()
@@ -69,6 +76,47 @@ export function listUnresolvedComments(db: Db, draftId: number): CommentRow[] {
       and(
         eq(schema.comments.draftId, draftId),
         eq(schema.comments.resolved, 0),
+      ),
+    )
+    .orderBy(asc(schema.comments.id))
+    .all();
+}
+
+// A22: unresolved PLAIN comments only (suggested_text IS NULL). The revise prompt
+// consumes these and ignores suggestions (D175); the lock gate keeps using the
+// count-everything variant above.
+export function listUnresolvedPlainComments(
+  db: Db,
+  draftId: number,
+): CommentRow[] {
+  return db
+    .select()
+    .from(schema.comments)
+    .where(
+      and(
+        eq(schema.comments.draftId, draftId),
+        eq(schema.comments.resolved, 0),
+        isNull(schema.comments.suggestedText),
+      ),
+    )
+    .orderBy(asc(schema.comments.id))
+    .all();
+}
+
+// A22: unresolved suggestions only (suggested_text IS NOT NULL). The mechanical
+// apply path consumes these.
+export function listUnresolvedSuggestions(
+  db: Db,
+  draftId: number,
+): CommentRow[] {
+  return db
+    .select()
+    .from(schema.comments)
+    .where(
+      and(
+        eq(schema.comments.draftId, draftId),
+        eq(schema.comments.resolved, 0),
+        isNotNull(schema.comments.suggestedText),
       ),
     )
     .orderBy(asc(schema.comments.id))

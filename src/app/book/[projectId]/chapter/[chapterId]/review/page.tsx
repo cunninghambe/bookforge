@@ -69,6 +69,7 @@ export default async function ReviewPage({
             quotedText: c.quotedText,
             comment: c.comment,
             resolved: c.resolved === 1,
+            suggestedText: c.suggestedText ?? null,
           }))}
           chapterId={chapter.id}
           projectId={project.id}

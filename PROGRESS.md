@@ -2007,3 +2007,24 @@ route and manifest key on stripEmphasis(paragraph) in one place, so
 paragraphs re-synthesize once without markers. The draft editor and the
 Markdown export stay raw markdown by design. 469 to 482 unit tests; 4 new
 a21 e2e; full clean-DB suite 57 green. See D169 through D173.
+---
+
+## Amendment A22: Desk-first inline review (2026-07-24)
+
+Status: COMPLETE. Field report: the comment flow was built for a phone (a
+static composer below the whole prose, no visible anchors, no way to type
+an exact replacement). Now a floating toolbar appears over any prose
+selection with Comment and Suggest edit; c and e open the composers from
+the keyboard, Ctrl+Enter submits, Escape cancels. A suggestion is the
+author's verbatim replacement (comments.suggested_text, guarded ALTER) and
+applies mechanically with NO model call: POST apply-suggestions anchors
+each via findSpan, skips not-found and overlapping ones with reasons, and
+splices the rest into ONE new draft version; applied rows resolve in
+place, unresolved rows move to the new draft. Suggestions are excluded
+from the revise prompt but still block locking. Unresolved comments and
+suggestions render as tinted inline anchors (pure decorateSegments over
+the A21 segments, rawStart tiling preserved, so selection mapping is
+untouched); clicking an anchor flashes its sidebar card. The static panel
+and every existing testid stay byte-identical. 482 to 504 unit tests; 6
+new a22 e2e (63 total); full clean-DB suite green (2 isolated-machine
+load flakes on a17/a2 reran green alone). See D174 through D179.

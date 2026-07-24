@@ -1,7 +1,7 @@
 import { getDb } from "@/lib/db";
 import { getChapter } from "@/lib/repo/chapters";
 import { getDraft } from "@/lib/repo/drafts";
-import { listUnresolvedComments } from "@/lib/repo/comments";
+import { listUnresolvedPlainComments } from "@/lib/repo/comments";
 import { assemblableCanon } from "@/lib/repo/canon";
 import { createRevision } from "@/lib/repo/revisions";
 import { logLlmCall } from "@/lib/repo/llm";
@@ -57,7 +57,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     typeof body.fixtureKey === "string" ? body.fixtureKey : undefined;
 
   const oldText = draft.content;
-  const comments = listUnresolvedComments(db, draftId);
+  // A22: only unresolved PLAIN comments become flagged spans for the model.
+  // Suggestions are the author's own text and apply mechanically (D175/D176); they
+  // still block locking through the count-everything variant used by the lock gate.
+  const comments = listUnresolvedPlainComments(db, draftId);
   const flaggedSpans: FlaggedSpan[] = comments.map((c) => ({
     quotedText: c.quotedText,
     spanStart: c.spanStart,

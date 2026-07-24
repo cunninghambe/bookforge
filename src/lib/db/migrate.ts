@@ -175,6 +175,15 @@ export function migrate(sqlite: Database.Database): void {
     definition: "TEXT",
   });
 
+  // Amendment A22: comments gains a nullable suggested_text column (the D175
+  // discriminator). NULL is a plain comment; a non-null value is the author's
+  // verbatim replacement text, applied mechanically. Guarded ALTER, same pattern.
+  addColumnIfMissing(sqlite, {
+    table: "comments",
+    column: "suggested_text",
+    definition: "TEXT",
+  });
+
   // Amendment A16: series_id on the four tables that were implicitly series-wide.
   // Added without a REFERENCES clause so the ALTER never has to validate existing
   // rows; NOT NULL semantics are enforced in code and by the backfill below.

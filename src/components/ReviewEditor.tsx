@@ -6,6 +6,8 @@ import { LockPanel } from "./LockPanel";
 import { VoiceNoteRecorder } from "./VoiceNoteRecorder";
 import { paragraphIndexForOffset } from "@/lib/audio/paragraphs";
 import { parseEmphasis } from "@/lib/markdown";
+import { findSpan } from "@/lib/revision/spans";
+import { decorateSegments, type ReviewAnchor } from "@/lib/reviewAnchors";
 
 const CONTROL_DELIM = "\n<<<BOOKFORGE_CTRL>>>\n";
 
@@ -48,12 +50,39 @@ interface CommentView {
   quotedText: string;
   comment: string;
   resolved: boolean;
+  // A22: non-null makes this row a suggestion (the author's verbatim replacement).
+  suggestedText: string | null;
 }
 
 interface PendingSelection {
   quotedText: string;
   start: number;
   end: number;
+}
+
+// A22.1: the floating popover shows a two-button toolbar over a fresh selection,
+// then swaps in place to a comment or suggest composer.
+type PopoverMode = "toolbar" | "comment" | "suggest";
+
+// A22.1: where the popover anchors, in coordinates relative to the prose wrapper.
+interface PopoverAnchor {
+  left: number;
+  top: number;
+  bottom: number;
+  // True when there is no room above the selection, so the popover flips below.
+  flip: boolean;
+}
+
+// A22.2: the outcome of a mechanical apply-suggestions call.
+interface SuggestionSkip {
+  id: number;
+  quotedText: string;
+  suggestedText: string;
+  reason: "not found" | "overlap";
+}
+interface SuggestionResult {
+  applied: number;
+  skips: SuggestionSkip[];
 }
 
 // A21: map a DOM selection endpoint inside the prose to a RAW content offset. The
@@ -64,6 +93,9 @@ interface PendingSelection {
 // that span's visible text. This keeps quotedText = content.slice(lo, hi) byte
 // identical to the pre-A21 single-text-node behavior. Returns null when the
 // endpoint is not inside a segment span (the caller then ignores the selection).
+// A22.3: the anchor decoration splits segments at anchor boundaries, so there may
+// be more, finer spans than in A21, but every one still carries a correct
+// data-raw-start, so this mapping is unchanged.
 function rawOffsetForEndpoint(
   root: HTMLElement,
   node: Node,
@@ -162,21 +194,93 @@ export function ReviewEditor({
   const [error, setError] = useState<string | null>(null);
   const proseRef = useRef<HTMLDivElement>(null);
 
+  // A22 state: the inline popover, its anchor, the inline composer fields, the
+  // apply-suggestions flow, and the anchor-click flash.
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [popover, setPopover] = useState<{ mode: PopoverMode } | null>(null);
+  const [anchor, setAnchor] = useState<PopoverAnchor | null>(null);
+  const [inlineComment, setInlineComment] = useState("");
+  const [inlineSuggest, setInlineSuggest] = useState("");
+  const [inlineNote, setInlineNote] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [suggestionResult, setSuggestionResult] =
+    useState<SuggestionResult | null>(null);
+  const [flashedId, setFlashedId] = useState<number | null>(null);
+
   const unresolvedCount = comments.filter((c) => !c.resolved).length;
+  // A22: the revise button consumes only plain comments; the apply button consumes
+  // only suggestions. The lock gate keeps counting every unresolved row (via
+  // unresolvedCount handed to LockPanel), so an unapplied suggestion still blocks.
+  const unresolvedPlainCount = comments.filter(
+    (c) => !c.resolved && c.suggestedText == null,
+  ).length;
+  const unresolvedSuggestionCount = comments.filter(
+    (c) => !c.resolved && c.suggestedText != null,
+  ).length;
 
-  // A21: the raw content rendered as emphasis segments. Each segment is wrapped in
-  // a span carrying its raw offset so a selection maps back to raw content offsets.
-  const segments = useMemo(() => parseEmphasis(content), [content]);
+  // A22.3: unresolved comments and suggestions become inline anchors, located with
+  // the same findSpan the server uses, then rendered as tinted spans over the prose.
+  const anchors = useMemo<ReviewAnchor[]>(() => {
+    const result: ReviewAnchor[] = [];
+    for (const c of comments) {
+      if (c.resolved) continue;
+      const span = findSpan(content, c.quotedText);
+      if (!span) continue;
+      result.push({
+        id: c.id,
+        start: span.start,
+        end: span.end,
+        kind: c.suggestedText != null ? "suggestion" : "comment",
+      });
+    }
+    return result;
+  }, [comments, content]);
 
-  // Capture a text selection inside the prose so it survives clicking a button.
+  const anchorKind = useMemo(() => {
+    const m = new Map<number, "comment" | "suggestion">();
+    for (const a of anchors) m.set(a.id, a.kind);
+    return m;
+  }, [anchors]);
+
+  // A21 + A22.3: the raw content rendered as emphasis segments, further split at
+  // anchor boundaries. Each finer segment still carries its raw offset, so a
+  // selection maps back to raw content offsets exactly as before.
+  const anchored = useMemo(
+    () => decorateSegments(content, anchors),
+    [content, anchors],
+  );
+
+  // Whether a non-collapsed selection currently sits inside the prose. Used to gate
+  // the single-key shortcuts (D179): they act only over a live prose selection.
+  const proseSelectionActive = useCallback((): boolean => {
+    const sel = window.getSelection();
+    const root = proseRef.current;
+    if (!sel || sel.rangeCount === 0 || !root) return false;
+    const range = sel.getRangeAt(0);
+    return (
+      !range.collapsed &&
+      root.contains(range.startContainer) &&
+      root.contains(range.endContainer)
+    );
+  }, []);
+
+  // Capture a text selection inside the prose so it survives clicking a button, and
+  // position the floating popover from the selection's bounding rect (A22.1).
   useEffect(() => {
     function onSelectionChange() {
       const sel = window.getSelection();
       const root = proseRef.current;
       if (!sel || sel.rangeCount === 0 || !root) return;
       const range = sel.getRangeAt(0);
-      if (range.collapsed) return;
-      if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) {
+      if (
+        range.collapsed ||
+        !root.contains(range.startContainer) ||
+        !root.contains(range.endContainer)
+      ) {
+        // The prose selection is gone. Hide only the bare toolbar; an open composer
+        // stays put (the caret is now inside it), and pending keeps its last value.
+        setPopover((cur) => (cur?.mode === "toolbar" ? null : cur));
         return;
       }
       const start = rawOffsetForEndpoint(root, range.startContainer, range.startOffset);
@@ -187,10 +291,92 @@ export function ReviewEditor({
       const quotedText = content.slice(lo, hi);
       if (quotedText.trim().length === 0) return;
       setPending({ quotedText, start: lo, end: hi });
+
+      const wrap = wrapperRef.current;
+      if (wrap) {
+        const rect = range.getBoundingClientRect();
+        const wrapRect = wrap.getBoundingClientRect();
+        const half = 110;
+        const maxLeft = Math.max(half, wrapRect.width - half);
+        const rawLeft = rect.left - wrapRect.left + rect.width / 2;
+        setAnchor({
+          left: Math.min(Math.max(rawLeft, half), maxLeft),
+          top: rect.top - wrapRect.top,
+          bottom: rect.bottom - wrapRect.top,
+          flip: rect.top - wrapRect.top < 160,
+        });
+      }
+      // Show the toolbar for a fresh selection; leave an open composer alone.
+      setPopover((cur) =>
+        cur === null || cur.mode === "toolbar" ? { mode: "toolbar" } : cur,
+      );
     }
     document.addEventListener("selectionchange", onSelectionChange);
     return () => document.removeEventListener("selectionchange", onSelectionChange);
   }, [content]);
+
+  // A22.1: open a composer for the current pending selection.
+  const openComposer = useCallback(
+    (mode: "comment" | "suggest") => {
+      if (!pending) return;
+      if (mode === "comment") {
+        setInlineComment("");
+      } else {
+        setInlineSuggest(pending.quotedText);
+        setInlineNote("");
+      }
+      setPopover({ mode });
+    },
+    [pending],
+  );
+
+  const closePopover = useCallback(() => setPopover(null), []);
+
+  // A22.1: single-key shortcuts. c opens the comment composer, e the suggest
+  // composer, but only over a live prose selection with focus outside any field, so
+  // they can never eat typed text (D179). Escape closes an open composer.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      const active = document.activeElement as HTMLElement | null;
+      const inField =
+        !!active &&
+        (active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.isContentEditable);
+      if (popover?.mode === "comment" || popover?.mode === "suggest") {
+        // The composer handles Ctrl+Enter and Escape while focused; also honor a
+        // global Escape if focus somehow left the composer.
+        if (e.key === "Escape" && !inField) {
+          e.preventDefault();
+          closePopover();
+        }
+        return;
+      }
+      if (inField) return;
+      if (!proseSelectionActive() || !pending) return;
+      if (e.key === "c") {
+        e.preventDefault();
+        openComposer("comment");
+      } else if (e.key === "e") {
+        e.preventDefault();
+        openComposer("suggest");
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [popover, pending, openComposer, closePopover, proseSelectionActive]);
+
+  // A22.1: clicking outside the popover cancels it.
+  useEffect(() => {
+    function onDown(e: MouseEvent) {
+      if (!popover) return;
+      const pop = popoverRef.current;
+      if (pop && pop.contains(e.target as Node)) return;
+      closePopover();
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [popover, closePopover]);
 
   async function refreshComments(id: number) {
     const res = await fetch(`/api/drafts/${id}/comments`);
@@ -201,6 +387,7 @@ export function ReviewEditor({
         quotedText: string;
         comment: string;
         resolved: number;
+        suggestedText: string | null;
       }>;
     };
     setComments(
@@ -209,6 +396,7 @@ export function ReviewEditor({
         quotedText: c.quotedText,
         comment: c.comment,
         resolved: c.resolved === 1,
+        suggestedText: c.suggestedText ?? null,
       })),
     );
   }
@@ -232,6 +420,69 @@ export function ReviewEditor({
     }
   }
 
+  // A22.1: submit the inline composer. Comment mode posts a plain comment; suggest
+  // mode posts a suggestion (the note is optional). Both hit the same endpoint the
+  // static panel uses, then refresh the sidebar.
+  async function submitComposer() {
+    if (!pending || !popover) return;
+    const body =
+      popover.mode === "comment"
+        ? {
+            quotedText: pending.quotedText,
+            comment: inlineComment,
+            spanStart: pending.start,
+            spanEnd: pending.end,
+          }
+        : {
+            quotedText: pending.quotedText,
+            comment: inlineNote,
+            suggestedText: inlineSuggest,
+            spanStart: pending.start,
+            spanEnd: pending.end,
+          };
+    if (popover.mode === "comment" && inlineComment.trim().length === 0) return;
+    if (
+      popover.mode === "suggest" &&
+      (inlineSuggest.trim().length === 0 || inlineSuggest === pending.quotedText)
+    ) {
+      return;
+    }
+    const res = await fetch(`/api/drafts/${draftId}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      setInlineComment("");
+      setInlineSuggest("");
+      setInlineNote("");
+      setPopover(null);
+      await refreshComments(draftId);
+    } else {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(data.error ?? "Could not save.");
+    }
+  }
+
+  function onComposerKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closePopover();
+    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      void submitComposer();
+    }
+  }
+
+  const composerReady =
+    popover?.mode === "comment"
+      ? inlineComment.trim().length > 0
+      : popover?.mode === "suggest"
+        ? inlineSuggest.trim().length > 0 &&
+          !!pending &&
+          inlineSuggest !== pending.quotedText
+        : false;
+
   async function resolveComment(id: number) {
     const res = await fetch(`/api/comments/${id}`, {
       method: "PATCH",
@@ -239,6 +490,49 @@ export function ReviewEditor({
       body: JSON.stringify({ resolved: true }),
     });
     if (res.ok) await refreshComments(draftId);
+  }
+
+  // A22.3: scroll the matching sidebar card into view and flash it.
+  function flashCard(id: number) {
+    const el = document.getElementById(`comment-card-${id}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlashedId(id);
+    window.setTimeout(
+      () => setFlashedId((cur) => (cur === id ? null : cur)),
+      1200,
+    );
+  }
+
+  // A22.2: apply the author's suggestions mechanically (no model call). The prose
+  // swaps to the new version, a banner reports the count, and skips are listed.
+  async function applySuggestions() {
+    if (applying || unresolvedSuggestionCount === 0) return;
+    setApplying(true);
+    setError(null);
+    setSuggestionResult(null);
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/apply-suggestions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          draft: { id: number; content: string };
+          applied: number;
+          skips: SuggestionSkip[];
+        };
+        setContent(data.draft.content);
+        setDraftId(data.draft.id);
+        setSuggestionResult({ applied: data.applied, skips: data.skips });
+        await refreshComments(data.draft.id);
+      } else {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(data.error ?? "Could not apply suggestions.");
+      }
+    } finally {
+      setApplying(false);
+    }
   }
 
   // Loads a persisted pending revision, if any, into the resolution UI. Used on
@@ -267,7 +561,7 @@ export function ReviewEditor({
   }, [loadPendingRevision]);
 
   async function revise() {
-    if (revising || unresolvedCount === 0) return;
+    if (revising || unresolvedPlainCount === 0) return;
     setRevising(true);
     setError(null);
     setRevision(null);
@@ -382,22 +676,204 @@ export function ReviewEditor({
           </div>
         )}
 
-        <div
-          ref={proseRef}
-          data-testid="review-prose"
-          className="max-w-[70ch] whitespace-pre-wrap rounded border border-edge bg-surface p-4 font-serif text-[15px] leading-relaxed text-ink"
-        >
-          {segments.map((seg, i) => (
-            <span key={i} data-raw-start={seg.rawStart}>
-              {seg.kind === "italic" ? (
-                <em>{seg.text}</em>
-              ) : seg.kind === "bold" ? (
-                <strong>{seg.text}</strong>
-              ) : (
-                seg.text
+        {suggestionResult && (
+          <div className="mb-3">
+            <div
+              data-testid="suggestions-applied"
+              className="rounded border border-ok-edge bg-ok px-3 py-2 text-sm text-ok-ink"
+            >
+              {suggestionResult.applied} suggestion
+              {suggestionResult.applied === 1 ? "" : "s"} applied as a new draft
+              version.
+            </div>
+            {suggestionResult.skips.length > 0 && (
+              <div
+                data-testid="suggestion-skips"
+                className="mt-2 rounded border border-warn-edge bg-warn p-3 text-sm text-warn-ink"
+              >
+                <p className="mb-2 font-medium">
+                  {suggestionResult.skips.length} suggestion
+                  {suggestionResult.skips.length === 1 ? "" : "s"} could not be
+                  applied and{" "}
+                  {suggestionResult.skips.length === 1 ? "was" : "were"} skipped.
+                </p>
+                <ul className="space-y-2">
+                  {suggestionResult.skips.map((s, i) => (
+                    <li
+                      key={i}
+                      data-testid={`suggestion-skip-${i}`}
+                      className="rounded border border-warn-edge bg-surface p-2"
+                    >
+                      <p className="text-xs uppercase text-faint">{s.reason}</p>
+                      <p className="mt-1 text-ink">
+                        <span className="text-faint">original: </span>
+                        {s.quotedText}
+                      </p>
+                      <p className="text-ink">
+                        <span className="text-faint">replacement: </span>
+                        {s.suggestedText}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div ref={wrapperRef} className="relative">
+          <div
+            ref={proseRef}
+            data-testid="review-prose"
+            className="max-w-[70ch] whitespace-pre-wrap rounded border border-edge bg-surface p-4 font-serif text-[15px] leading-relaxed text-ink"
+          >
+            {anchored.map((seg, i) => {
+              const hasAnchor = seg.anchorIds.length > 0;
+              const kind = hasAnchor
+                ? seg.anchorIds.some(
+                    (id) => anchorKind.get(id) === "suggestion",
+                  )
+                  ? "suggestion"
+                  : "comment"
+                : null;
+              const flashing =
+                flashedId !== null && seg.anchorIds.includes(flashedId);
+              const cls = [
+                hasAnchor ? "cursor-pointer rounded-[2px]" : "",
+                kind === "suggestion"
+                  ? "bg-info-chip"
+                  : kind === "comment"
+                    ? "bg-warn-chip"
+                    : "",
+                flashing ? "ring-2 ring-focus" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
+                <span
+                  key={i}
+                  data-raw-start={seg.rawStart}
+                  data-anchor-ids={
+                    hasAnchor ? seg.anchorIds.join(",") : undefined
+                  }
+                  className={cls || undefined}
+                  onClick={
+                    hasAnchor ? () => flashCard(seg.anchorIds[0]) : undefined
+                  }
+                >
+                  {seg.kind === "italic" ? (
+                    <em>{seg.text}</em>
+                  ) : seg.kind === "bold" ? (
+                    <strong>{seg.text}</strong>
+                  ) : (
+                    seg.text
+                  )}
+                </span>
+              );
+            })}
+          </div>
+
+          {popover && anchor && (
+            <div
+              ref={popoverRef}
+              className="absolute z-20"
+              style={{
+                left: `${anchor.left}px`,
+                top: `${anchor.flip ? anchor.bottom + 8 : anchor.top - 8}px`,
+                transform: anchor.flip
+                  ? "translate(-50%, 0)"
+                  : "translate(-50%, -100%)",
+              }}
+            >
+              {popover.mode === "toolbar" && (
+                <div
+                  data-testid="selection-toolbar"
+                  className="flex items-center gap-1 rounded-lg border border-edge bg-surface p-1 shadow-lg"
+                >
+                  <button
+                    data-testid="toolbar-comment-button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => openComposer("comment")}
+                    className="rounded px-2 py-1 text-sm text-ink hover:bg-inset"
+                  >
+                    Comment
+                  </button>
+                  <button
+                    data-testid="toolbar-suggest-button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => openComposer("suggest")}
+                    className="rounded px-2 py-1 text-sm text-ink hover:bg-inset"
+                  >
+                    Suggest edit
+                  </button>
+                </div>
               )}
-            </span>
-          ))}
+
+              {(popover.mode === "comment" || popover.mode === "suggest") && (
+                <div
+                  data-testid="inline-composer"
+                  onKeyDown={onComposerKeyDown}
+                  className="w-72 rounded-lg border border-edge bg-surface p-2 shadow-lg"
+                >
+                  {popover.mode === "comment" ? (
+                    <>
+                      <p className="mb-1 rounded bg-warn px-2 py-1 text-xs text-warn-ink">
+                        <EmphasisText text={pending?.quotedText ?? ""} />
+                      </p>
+                      <textarea
+                        aria-label="Inline comment"
+                        data-testid="inline-comment-input"
+                        autoFocus
+                        value={inlineComment}
+                        onChange={(e) => setInlineComment(e.target.value)}
+                        rows={3}
+                        className="w-full rounded border border-edge p-2 text-sm"
+                        placeholder="What should change about this span?"
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <p className="mb-1 text-xs uppercase tracking-wide text-faint">
+                        Replacement text
+                      </p>
+                      <textarea
+                        aria-label="Inline suggestion"
+                        data-testid="inline-suggest-input"
+                        autoFocus
+                        value={inlineSuggest}
+                        onChange={(e) => setInlineSuggest(e.target.value)}
+                        rows={3}
+                        className="w-full rounded border border-edge p-2 font-serif text-sm"
+                        placeholder="Type the exact replacement."
+                      />
+                      <textarea
+                        aria-label="Inline note"
+                        data-testid="inline-note-input"
+                        value={inlineNote}
+                        onChange={(e) => setInlineNote(e.target.value)}
+                        rows={2}
+                        className="mt-1 w-full rounded border border-edge p-2 text-sm"
+                        placeholder="Optional note"
+                      />
+                    </>
+                  )}
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-faint">
+                      Ctrl+Enter to save, Esc to cancel
+                    </span>
+                    <button
+                      data-testid="inline-composer-submit"
+                      onClick={submitComposer}
+                      disabled={!composerReady}
+                      className="rounded bg-accent hover:bg-accent-hover px-3 py-1 text-sm text-accent-ink disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="mt-3 rounded border border-edge-soft p-3">
@@ -644,17 +1120,32 @@ export function ReviewEditor({
           {comments.map((c) => (
             <li
               key={c.id}
+              id={`comment-card-${c.id}`}
               data-testid={`comment-${c.id}`}
               className={`rounded border p-2 ${
                 c.resolved
                   ? "border-edge-soft bg-inset text-faint"
                   : "border-edge"
-              }`}
+              } ${flashedId === c.id ? "ring-2 ring-focus" : ""}`}
             >
+              {c.suggestedText != null && (
+                <span
+                  data-testid={`suggestion-badge-${c.id}`}
+                  className="mb-1 inline-block rounded bg-info-chip px-1.5 py-0.5 text-xs uppercase tracking-wide text-info-ink"
+                >
+                  Suggestion
+                </span>
+              )}
               <p className="mb-1 text-xs italic text-muted">
                 &ldquo;<EmphasisText text={c.quotedText} />&rdquo;
               </p>
-              <p className="mb-1">{c.comment}</p>
+              {c.suggestedText != null && (
+                <p className="mb-1 text-sm" data-testid={`suggestion-replacement-${c.id}`}>
+                  <span className="text-faint">replace with: </span>
+                  <EmphasisText text={c.suggestedText} />
+                </p>
+              )}
+              {c.comment.trim().length > 0 && <p className="mb-1">{c.comment}</p>}
               {c.resolved ? (
                 <span className="text-xs text-ok-ink">resolved</span>
               ) : (
@@ -673,14 +1164,28 @@ export function ReviewEditor({
         <button
           data-testid="revise-button"
           onClick={revise}
-          disabled={revising || unresolvedCount === 0}
+          disabled={revising || unresolvedPlainCount === 0}
           className="mt-4 w-full rounded bg-accent hover:bg-accent-hover px-3 py-2 text-accent-ink disabled:opacity-50"
         >
           {revising ? "Revising..." : "Revise flagged spans"}
         </button>
-        {unresolvedCount === 0 && (
+        {unresolvedPlainCount === 0 && (
           <p className="mt-1 text-xs text-faint">
             Add at least one unresolved comment to revise.
+          </p>
+        )}
+
+        <button
+          data-testid="apply-suggestions-button"
+          onClick={applySuggestions}
+          disabled={applying || unresolvedSuggestionCount === 0}
+          className="mt-2 w-full rounded bg-accent hover:bg-accent-hover px-3 py-2 text-accent-ink disabled:opacity-50"
+        >
+          {applying ? "Applying..." : "Apply suggestions"}
+        </button>
+        {unresolvedSuggestionCount === 0 && (
+          <p className="mt-1 text-xs text-faint">
+            Suggest an exact replacement to apply it without a model call.
           </p>
         )}
 
