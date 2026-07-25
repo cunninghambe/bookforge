@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { modelMap, isModelPurpose } from "@/lib/modelFor";
+import { isValidModelId } from "@/lib/llm/validate";
 import { setSetting, deleteSetting } from "@/lib/repo/settings";
 
 // A8: the per-purpose model map. GET returns every purpose with its effective model
@@ -35,6 +36,14 @@ export async function PUT(req: Request) {
   if (model === "") {
     deleteSetting(db, `model.${purpose}`);
   } else {
+    // A23.4 / D188: a stored override eventually lands in the CLI argv, so the
+    // shape is checked here at the settings boundary as well as in
+    // buildCliArgs. A bad value is a user error, not a 500 later.
+    if (!isValidModelId(model)) {
+      return NextResponse.json({ error: `invalid model "${model}"` }, {
+        status: 400,
+      });
+    }
     setSetting(db, `model.${purpose}`, model);
   }
 

@@ -229,7 +229,7 @@ git fetch origin
 git reset --hard origin/master
 npm install
 npx next build
-node scripts/uh-oh-upload-sourcemaps.mjs --dir .next --release 0.1.0+0 --delete-browser-maps
+node scripts/uh-oh-upload-sourcemaps.mjs --dir .next --release 0.1.0+0
 npm run migrate
 pm2 restart bookforge
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3009/login   # expect 200
@@ -254,14 +254,21 @@ a fixed `+0` build segment, so `0.1.0+0` today); a mismatched release uploads
 fine but symbolicates nothing, so bump the flag value whenever the package
 version bumps.
 
-`--delete-browser-maps` is required on this deploy, not optional: everything
-under `/_next/static/` bypasses the auth middleware (the login page's own
-assets must load pre-auth), so any `.js.map` left in `.next/static` is
-world-readable, exposing the client-side source. The flag removes the
-uploaded `static/**/*.js.map` files after ALL uploads succeed (never on
-partial failure), and symbolication is unaffected because the uh-oh server
-keeps its own copies. The `.js` chunks retain `sourceMappingURL` comments
-pointing at now-404 URLs, which is harmless.
+Browser source maps are deleted by DEFAULT (A23.9 / D192), so the command
+above needs no flag for it. This matters because everything under
+`/_next/static/` bypasses the auth middleware (the login page's own assets
+must load pre-auth), so any `.js.map` left in `.next/static` is
+world-readable, exposing the client-side source. That happened twice on
+2026-07-24 with the old opt-in flag, which is why the default was inverted.
+The uploaded `static/**/*.js.map` files are removed after ALL uploads succeed
+(never on partial failure), and symbolication is unaffected because the uh-oh
+server keeps its own copies. The `.js` chunks retain `sourceMappingURL`
+comments pointing at now-404 URLs, which is harmless.
+
+`--keep-browser-maps` opts out and keeps them on disk; only pass it when you
+have a reason to serve maps publicly. The old `--delete-browser-maps` is still
+accepted as a no-op alias, so a deploy script that passes it keeps working and
+still deletes.
 
 ## Better voices (A19): Kokoro TTS and whisper turbo STT
 

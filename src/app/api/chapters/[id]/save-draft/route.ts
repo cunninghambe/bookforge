@@ -18,7 +18,26 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   } catch {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const content = typeof body.content === "string" ? body.content : "";
+  // A23 / D187: this used to coerce a missing or non-string content to "", and
+  // saveWorkingDraft updates the latest draft row IN PLACE, so a request
+  // carrying {} silently replaced a finished chapter with an empty string with
+  // no version to recover from. The in-place update is correct for its purpose
+  // and stays; the coercion was the danger.
+  if (typeof body.content !== "string") {
+    return NextResponse.json(
+      { error: "content must be a string" },
+      { status: 400 },
+    );
+  }
+  // D187: and it worked on LOCKED chapters, which have no business changing
+  // through this route at all.
+  if (chapter.status === "locked") {
+    return NextResponse.json(
+      { error: "chapter is locked" },
+      { status: 409 },
+    );
+  }
+  const content = body.content;
   const draft = saveWorkingDraft(db, chapterId, content);
   if (chapter.status === "planned" || chapter.status === "interrogating") {
     updateChapter(db, chapterId, { status: "drafting" });

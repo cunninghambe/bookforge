@@ -2036,3 +2036,35 @@ with the a22 toolbar test strengthened to assert the reminders.
 
 Addendum (2026-07-24): the fallback composer and shortcut reminder moved
 from below the prose into the top of the sidebar (D181). Testids unchanged.
+---
+
+## Amendment A23: Security hardening (2026-07-25)
+
+Status: COMPLETE. A five-surface review (auth, API and data, the LLM
+subprocess, the client, the box) found and this amendment fixed: no
+security headers at all, so the app was framable and every destructive
+control is a single unconfirmed click (now CSP frame-ancestors none plus
+five more headers); a malformed session cookie returned 500 on every gated
+path, verified live before the fix (now shape-checked, 401); sessions
+survived a password change (the signing key is now derived from BOTH
+secrets, so rotating either revokes, and max age is 7 days not 30); the
+password compare leaked its length (now compares fixed-width HMAC digests);
+no login throttle at all on a box that is actively probed (now per-IP and
+global counters, 429 with Retry-After, one log line per failure, and a
+correct password is never throttled, D193); an unhandled EPIPE on the CLI
+child's stdin crashed the whole server on one bad model id; manuscript text
+could truncate the streamed control frame the author reviews before
+approving (indexOf became lastIndexOf); PATCH could set a chapter to locked,
+bypassing the unresolved-comment gate that POST /lock enforces; and
+save-draft coerced a non-string body to "" and wrote it IN PLACE over a
+finished, locked chapter with no new version to recover from. Cross-site
+requests are now refused for writes and for any reach into /api/, while
+plain links to the app still work (D194). Source maps now delete by default
+after upload: an opt-in flag had left 28 of them world-readable on the live
+site, which this review caught and closed. next bumped to 15.5.21, closing
+eight advisories. Command injection was NOT present on the production path
+and that property is preserved. 504 to 562 unit tests; 63 e2e unchanged and
+green. See D182 through D194.
+
+Box-level findings (service exposure, file permissions, off-box backups)
+are recorded for the owner and deliberately not actioned from the repo.

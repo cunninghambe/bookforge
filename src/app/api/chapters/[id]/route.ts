@@ -35,6 +35,19 @@ export async function PATCH(req: Request, ctx: Ctx) {
   if (status !== undefined && !CHAPTER_STATUSES.includes(status as ChapterStatus)) {
     return NextResponse.json({ error: "invalid status" }, { status: 400 });
   }
+  // A23.6 / D190: locking is a gated, human-only action. POST /lock refuses
+  // while any comment is unresolved; this route had no such check, so the gate
+  // was enforced in one place and open in another. Every other transition is
+  // untouched.
+  if (status === "locked") {
+    return NextResponse.json(
+      {
+        error:
+          "use POST /api/chapters/[id]/lock to lock a chapter; it enforces the unresolved-comment gate",
+      },
+      { status: 400 },
+    );
+  }
   const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   const chapter = updateChapter(db, chapterId, {
     title: str(body.title),

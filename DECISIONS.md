@@ -2337,3 +2337,146 @@ position); the only copy change is dropping the word "above" from the
 panel's empty-state line, which position made false. On phones the aside
 stacks below the prose as before, and the popover remains the primary
 composer there.
+
+### D182: The review's threat model, written down so severity is arguable
+
+Public internet, ONE shared password, unpublished manuscript, paid model
+calls, running as root beside other services. No multi-tenancy, so per-user
+authorization is not a concern and classic IDOR findings were dismissed.
+What counts: unauthenticated reach, availability, untrusted text reaching a
+shell or a path, and anything that weakens an approval gate. Five surfaces
+were audited independently (auth, API and data, the LLM subprocess, the
+client, the box) and every finding below was re-verified against the code
+or against the deployed site before being acted on.
+
+### D183: Headers are set in next.config.ts, not in middleware or Caddy
+
+One place, applied to every path, versioned with the app. Caddy could set
+them, but then the repo's posture would depend on infrastructure the repo
+cannot see. frame-ancestors 'none' is the load-bearing one: no destructive
+control in this UI has a confirmation step, so a framed click deletes canon
+or starts a paid run. script-src is deliberately omitted: it needs a
+per-request nonce, and the review found NO html injection sink in the app
+(no dangerouslySetInnerHTML, no innerHTML, nothing), so a script policy
+would be defense in depth against a hole that does not exist. Recorded as a
+follow-up, not a gap.
+
+### D184: Cross-site requests are refused by Sec-Fetch-Site, not by a CSRF token
+
+SameSite=Lax already blocks cross-SITE writes, but the cookie's site is the
+registrable domain, so any sibling host under the same domain is same-site
+and can drive writes. A token would mean threading state through every form
+and fetch. One header check in the middleware covers every route at once:
+same-origin requests report "same-origin", typed URLs and bookmarks report
+"none", and only genuine cross-site traffic reports "cross-site". This also
+closes the audio GET vector, where Lax does send the cookie on a top-level
+navigation.
+
+### D185: The session key is derived from both secrets, so rotating either revokes
+
+Sessions were signed with SESSION_SECRET alone, so changing APP_PASSWORD
+after a suspected compromise revoked nothing and "Log out" only cleared the
+local cookie. Keying the HMAC on both secrets makes password rotation the
+revocation lever a single-user app actually reaches for. Accepted cost: the
+deploy that lands this signs the author out once. Max age drops 30 days to
+7 for the same reason.
+
+### D186: A malformed cookie must fail closed AND quietly
+
+fromBase64Url ran atob outside the try, so any non-base64 cookie threw
+through verifySessionToken into the middleware and returned 500 on every
+gated path. Verified live before the fix: four malformed cookies, four
+500s, no session required. It never granted access, so this is availability
+and noise (it also floods crash reporting), not a bypass. Both token halves
+are now shape-checked before decoding.
+
+### D187: save-draft validates its input and refuses locked chapters
+
+saveWorkingDraft updates the latest draft row IN PLACE by design (one
+evolving working draft until a revision or lock cuts a version). Combined
+with `typeof body.content === "string" ? body.content : ""`, a request
+carrying {} or a non-string silently replaced a finished chapter with an
+empty string, with no new version to recover from, on a LOCKED chapter.
+That is the manuscript, so the coercion is replaced with a 400 and the
+route refuses to write to a locked chapter. The in-place update stays: it
+is correct for its purpose, and the danger was the coercion, not the shape.
+
+### D188: The subprocess boundary keeps its safety property; the crash is the bug
+
+Command injection is NOT present on the production path: Linux always
+spawns with shell false and the prompt rides stdin, never argv (D65). That
+property is preserved, not rebuilt. The real defect was an unhandled EPIPE:
+when the CLI exits before draining stdin, writing the prompt emits an error
+on a stream with no listener, which is an uncaught exception that kills the
+server. One authenticated request with a bad model id does it. ffmpeg.ts
+already installs exactly the handler needed; llm/client.ts now does too.
+The Windows shell fallback stays working (it is the author's dev machine)
+but the model id is validated so no metacharacter can reach that argv.
+
+### D189: Delimiter scanning uses lastIndexOf because the server writes the frame last
+
+The streaming control delimiter is documented as a string that "will never
+occur in generated prose", which is an assumption about model output, not
+an invariant. Manuscript text can instruct the model to emit it, splitting
+its own stream and hiding everything after it from the author who is about
+to approve a revision. The server always appends the genuine frame last, so
+scanning from the end is strictly correct and cannot be spoofed by content.
+
+### D190: Locking is gated in one place, so PATCH stops accepting it
+
+POST /lock refuses while comments are unresolved; PATCH /api/chapters/[id]
+accepted {"status":"locked"} with no such check, so the gate was enforced
+in one route and open in another. PATCH now rejects a locked status and
+points at the lock endpoint. The canon PATCH-to-locked is left alone: it is
+documented as an author-equivalent action on standing data (see the MCP
+boundary note), whereas chapter locking has a real precondition to skip.
+
+### D191: The login limiter is in-memory because the deploy pins one instance
+
+A pure decideLogin(state, key, now) backs a module-level counter, per IP and
+global, since XFF is attacker-controlled. DEPLOY.md pins exactly one pm2
+instance, so shared storage would be ceremony. The password is long and
+random, so this is not credential defense; it is cost control and the
+detection signal that was missing (the Caddy log shows the box being
+probed). Failures log one warning line and return 429 with Retry-After.
+
+### D192: Source maps delete by default, because a remembered flag is not a control
+
+productionBrowserSourceMaps plus an opt-in --delete-browser-maps published
+the app's client source to the internet whenever a deploy forgot the flag.
+That happened, twice, on 2026-07-24, and was caught by this review: 28 maps
+were live and fetchable. Deletion is now the default with an explicit
+--keep-browser-maps opt-out, so the unsafe outcome requires a deliberate
+choice rather than a perfect memory.
+
+### D193: A correct password is never throttled
+
+The limiter as first built consulted the throttle before checking the
+password, which is the textbook ordering and wrong here. The global bound
+exists because X-Forwarded-For is attacker-controlled, so anyone on the
+internet could push the global counter past its limit and lock the AUTHOR
+out of his own manuscript for the rest of the window. The box is
+demonstrably probed (the Caddy log carries 1855 hits on /login and 57
+requests for /.env), so that is an operational certainty, not a theory.
+The password is therefore checked first, and the throttle now decides only
+whether a FAILED attempt is answered with 429 instead of 401. Nothing is
+conceded: a wrong guess still reveals nothing, still costs the attacker a
+request, and still trips both counters, and the credential itself carries
+about 95 bits (D191), which is what actually defeats guessing. Availability
+for the one legitimate user beats a rate limit that cannot protect a secret
+this strong.
+
+### D194: Cross-site refusal covers writes and the API, not links to the app
+
+Refusing every cross-site request breaks an ordinary thing: clicking a link
+to bookforge from a chat client, an email, or any other site sends
+Sec-Fetch-Site: cross-site on that top-level navigation, so the author would
+get a 403 where he expected his book. Bookmarks and typed URLs send "none"
+and were never affected, which is exactly why this is easy to miss in
+testing. The rule is therefore: refuse cross-site requests that are writes
+(any method other than GET or HEAD), and refuse cross-site requests to
+/api/ even when they are GETs, since the audio route synthesizes speech on a
+plain GET and nothing honest navigates cross-site into this API. A
+cross-site GET of a PAGE is allowed, because rendering a page mutates
+nothing and the session still has to be valid to see it. This keeps every
+attack D184 was written for closed while leaving the app linkable.

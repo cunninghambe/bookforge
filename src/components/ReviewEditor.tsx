@@ -596,7 +596,11 @@ export function ReviewEditor({
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
       }
-      const delimIdx = buffer.indexOf(CONTROL_DELIM);
+      // A23.5 / D189: scan from the END. The delimiter is only assumed absent
+      // from generated prose, and this frame is what the author approves, so
+      // spoofed content must not be able to truncate it. The server always
+      // writes the genuine frame last, so lastIndexOf is strictly correct.
+      const delimIdx = buffer.lastIndexOf(CONTROL_DELIM);
       if (delimIdx === -1) {
         setError("Revision stream ended without a control frame.");
         return;

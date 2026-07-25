@@ -108,7 +108,11 @@ export function DraftEditor({
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      const delimIdx = buffer.indexOf(CONTROL_DELIM);
+      // A23.5 / D189: scan from the END. Prose that contains the delimiter
+      // (manuscript text can instruct the model to emit it) would otherwise
+      // hide everything after it from the author. The server always writes the
+      // genuine frame last, so lastIndexOf is strictly correct.
+      const delimIdx = buffer.lastIndexOf(CONTROL_DELIM);
       if (delimIdx === -1) {
         // Still streaming prose. Show it live.
         setContent(prefix + separator + buffer);
@@ -119,8 +123,8 @@ export function DraftEditor({
       }
     }
 
-    // Parse the trailing control frame.
-    const delimIdx = buffer.indexOf(CONTROL_DELIM);
+    // Parse the trailing control frame. D189: the genuine frame is the last one.
+    const delimIdx = buffer.lastIndexOf(CONTROL_DELIM);
     if (delimIdx !== -1) {
       const json = buffer.slice(delimIdx + CONTROL_DELIM.length);
       try {

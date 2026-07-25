@@ -37,7 +37,12 @@ export class ChatStreamParser {
   // a prefix of the delimiter is held back until it either completes into the
   // real delimiter or turns out to be ordinary text.
   visibleText(): string {
-    const idx = this.buffer.indexOf(CONTROL_DELIM);
+    // A23.5 / D189: scan from the END. The delimiter is documented as a string
+    // that will never occur in generated prose, but nothing enforces that, and
+    // manuscript text can instruct the model to emit it. The server always
+    // writes the genuine frame last, so lastIndexOf is strictly correct and
+    // cannot be spoofed by content.
+    const idx = this.buffer.lastIndexOf(CONTROL_DELIM);
     if (idx >= 0) return this.buffer.slice(0, idx);
     const maxHold = Math.min(CONTROL_DELIM.length - 1, this.buffer.length);
     for (let k = maxHold; k > 0; k--) {
@@ -49,7 +54,8 @@ export class ChatStreamParser {
   }
 
   finish(): ChatStreamEnd {
-    const idx = this.buffer.indexOf(CONTROL_DELIM);
+    // D189: the genuine frame is always the last one written.
+    const idx = this.buffer.lastIndexOf(CONTROL_DELIM);
     if (idx < 0) {
       return { text: this.buffer, control: null, parseError: false };
     }

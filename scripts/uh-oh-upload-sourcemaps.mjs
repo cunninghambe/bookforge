@@ -1,6 +1,14 @@
 // GENERATED FILE - vendored from uh-oh scripts/vendor-sourcemap-uploader.mjs (uh-oh-upload-sourcemaps.mjs).
 // Do not hand-edit. Regenerate: node scripts/vendor-sourcemap-uploader.mjs --out scripts/uh-oh-upload-sourcemaps.mjs
 // Self-contained: zero dependencies, node:fs/path/process + built-in fetch only.
+//
+// LOCAL DIVERGENCE (bookforge A23.9 / D192, 2026-07-25): browser source map
+// deletion was inverted to be the DEFAULT, with a new --keep-browser-maps
+// opt-out; --delete-browser-maps is kept as a no-op alias so existing deploy
+// commands keep working. The upstream generator lives in a different repo and
+// does not carry this change, so a regeneration WILL silently revert it. Re-apply
+// the inversion (parseArgs plus the deletion block near the end) after any
+// regeneration, or the unsafe outcome goes back to being one forgotten flag away.
 
 // uh-oh source map uploader (self-contained, zero dependencies).
 //
@@ -15,9 +23,12 @@
 // Options:
 //   --dir <path>            Next.js build dir (holds static/ and server/). Required.
 //   --release <ver+build>   Release identifier, e.g. 1.4.2+37. Required.
-//   --delete-browser-maps   After ALL uploads succeed, delete the uploaded
-//                           static/**/*.js.map files so public deploys do not
-//                           serve source maps. Never deletes on partial failure.
+//   --keep-browser-maps     Keep the uploaded static/**/*.js.map files on disk.
+//                           By DEFAULT they are deleted after ALL uploads
+//                           succeed (never on partial failure), so a public
+//                           deploy does not serve the app's client source.
+//   --delete-browser-maps   Accepted and ignored: deletion is the default now.
+//                           Kept so existing deploy commands do not break.
 //   --dry-run               List what would be uploaded; make no network calls.
 //   --require               Treat missing env as an error (exit 1) instead of a
 //                           no-op, for CI that wants to enforce uploads.
@@ -43,7 +54,9 @@ function mb(size) {
 }
 
 function parseArgs(argv) {
-  const args = { deleteBrowserMaps: false, dryRun: false, require: false };
+  // D192: deletion is the default. --keep-browser-maps is the opt-out, and
+  // --delete-browser-maps is a no-op alias for the commands that still pass it.
+  const args = { keepBrowserMaps: false, dryRun: false, require: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dir') {
@@ -52,8 +65,10 @@ function parseArgs(argv) {
     } else if (a === '--release') {
       i++;
       args.release = argv[i];
+    } else if (a === '--keep-browser-maps') {
+      args.keepBrowserMaps = true;
     } else if (a === '--delete-browser-maps') {
-      args.deleteBrowserMaps = true;
+      // No-op alias: this is the default behavior now.
     } else if (a === '--dry-run') {
       args.dryRun = true;
     } else if (a === '--require') {
@@ -374,21 +389,23 @@ async function main() {
       ' skipped)\n',
   );
 
-  if (args.deleteBrowserMaps) {
-    if (failed > 0) {
-      process.stderr.write('uh-oh: not deleting browser source maps because some uploads failed\n');
-    } else {
-      let deleted = 0;
-      for (const p of uploadedWebPaths) {
-        try {
-          unlinkSync(p);
-          deleted++;
-        } catch (e) {
-          process.stderr.write('uh-oh: could not delete ' + p + ': ' + errMsg(e) + '\n');
-        }
+  if (args.keepBrowserMaps) {
+    process.stdout.write(
+      'uh-oh: keeping browser source maps on disk (--keep-browser-maps)\n',
+    );
+  } else if (failed > 0) {
+    process.stderr.write('uh-oh: not deleting browser source maps because some uploads failed\n');
+  } else {
+    let deleted = 0;
+    for (const p of uploadedWebPaths) {
+      try {
+        unlinkSync(p);
+        deleted++;
+      } catch (e) {
+        process.stderr.write('uh-oh: could not delete ' + p + ': ' + errMsg(e) + '\n');
       }
-      process.stdout.write('uh-oh: deleted ' + deleted + ' browser source map file(s)\n');
     }
+    process.stdout.write('uh-oh: deleted ' + deleted + ' browser source map file(s)\n');
   }
 
   return failed > 0 ? 1 : 0;

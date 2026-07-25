@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { isValidFixtureKey, isValidModelId } from "./validate";
 
 // One injectable LLM client. In tests and E2E (USE_FIXTURE_LLM=1) a fixture player
 // answers from tests/fixtures/*.json so nothing ever hits the network. In real use
@@ -131,6 +132,14 @@ interface FixtureFile {
 }
 
 function loadFixture(purpose: LlmPurpose, fixtureKey?: string): FixtureFile {
+  // A23.4 / D188: fixtureKey arrives verbatim from nine request bodies and is
+  // interpolated into a filename. Shape-check it here, at the boundary, so no
+  // caller has to remember to.
+  if (fixtureKey !== undefined && !isValidFixtureKey(fixtureKey)) {
+    throw new Error(
+      `invalid fixtureKey: only letters, digits, dot, underscore, and hyphen are allowed`,
+    );
+  }
   const name = fixtureKey ? `${purpose}.${fixtureKey}.json` : `${purpose}.json`;
   const path = resolve(process.cwd(), "tests", "fixtures", name);
   const raw = readFileSync(path, "utf8");
@@ -330,6 +339,15 @@ export interface CliArgsOptions {
 // built-in tool and --max-turns 1 keeps it single-turn. With neither A10 session
 // option the argv is byte-identical to the pre-A10 shape. Unit tested.
 export function buildCliArgs(opts: CliArgsOptions): string[] {
+  // A23.4 / D188: the model id is the one caller-supplied value that reaches
+  // argv. The Windows fallback can spawn with shell true (D64), where argv
+  // values are not quoted, so a metacharacter here would execute. The fallback
+  // is left working; the value can no longer carry one.
+  if (!isValidModelId(opts.model)) {
+    throw new ClaudeCodeError(`invalid model id: ${opts.model}`, {
+      transient: false,
+    });
+  }
   const args: string[] = ["--print", "--model", opts.model, "--max-turns", "1"];
   if (!opts.persistSession && opts.resumeSessionId === undefined) {
     args.push("--no-session-persistence");
@@ -670,6 +688,12 @@ export class ClaudeCodeClient implements LlmClient {
               }
             }),
           );
+      child.stdin?.on("error", () => {
+        // The child may exit before stdin drains; the close handler reports it.
+        // Without this listener an EPIPE here (bad model id, expired CLI auth,
+        // an unknown flag after an upgrade) is an uncaught exception that kills
+        // the server on one authenticated request. See D188.
+      });
       child.stdin?.write(payload);
       child.stdin?.end();
     });
@@ -756,6 +780,12 @@ export class ClaudeCodeClient implements LlmClient {
       timedOut = true;
       child.kill();
     }, cliTimeoutMs());
+    child.stdin?.on("error", () => {
+      // The child may exit before stdin drains; the close handler reports it.
+      // Without this listener an EPIPE here (bad model id, expired CLI auth,
+      // an unknown flag after an upgrade) is an uncaught exception that kills
+      // the server on one authenticated request. See D188.
+    });
     child.stdin?.write(payload);
     child.stdin?.end();
 
