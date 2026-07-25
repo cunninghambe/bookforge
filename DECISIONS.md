@@ -2480,3 +2480,19 @@ plain GET and nothing honest navigates cross-site into this API. A
 cross-site GET of a PAGE is allowed, because rendering a page mutates
 nothing and the session still has to be valid to see it. This keeps every
 attack D184 was written for closed while leaving the app linkable.
+
+### D195: A failing speech service is a 502, and its message stays server-side
+
+Reworked from an auto-filed PR (#3) that had gone stale against three later
+amendments. The defect was real and still present: the audio route called
+the TTS bridge with no error handling, so a service that was down,
+restarting, or erroring threw out of the handler and the listener got an
+opaque failure part way through a chapter. D165 had fixed the neighbouring
+case (text the voice cannot speak now synthesizes as silence), which is why
+this one survived: it is the SERVICE failing, not the text. The route now
+answers 502, which ListenPlayer already renders as a Retry rather than a
+dead stop. The PR returned the underlying error message to the browser;
+that part was dropped. The message comes from another service and the
+client has no use for it, so it is logged with the chapter and paragraph
+and a fixed sentence goes over the wire, consistent with A23 keeping
+service and subprocess text off the response.

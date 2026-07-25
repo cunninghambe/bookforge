@@ -2068,3 +2068,11 @@ green. See D182 through D194.
 
 Box-level findings (service exposure, file permissions, off-box backups)
 are recorded for the owner and deliberately not actioned from the repo.
+
+Addendum (2026-07-25): audio route returns 502 when the speech service
+fails, instead of throwing out of the handler (D195). Reworked from the
+stale auto-filed PR #3; its error-message passthrough was dropped. PR #2
+(uh-oh source-map pipeline) was closed as superseded: that work is already
+in master by another path, and merging it would have reverted the A23
+security headers, the source-map delete-by-default, and the crash-report
+scrub.
