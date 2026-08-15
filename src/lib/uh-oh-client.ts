@@ -493,10 +493,11 @@ export class Client {
           : undefined;
 
     this.now = deps.now ?? (() => Date.now());
-    this.setTimeoutFn = deps.setTimeoutFn ?? G.setTimeout ?? (() => 0);
-    this.clearTimeoutFn = deps.clearTimeoutFn ?? G.clearTimeout ?? (() => undefined);
-    this.setIntervalFn = deps.setIntervalFn ?? G.setInterval ?? (() => 0);
-    this.clearIntervalFn = deps.clearIntervalFn ?? G.clearInterval ?? (() => undefined);
+    // Bound: browsers reject a native timer called with a non-global `this`.
+    this.setTimeoutFn = deps.setTimeoutFn ?? G.setTimeout?.bind(G) ?? (() => 0);
+    this.clearTimeoutFn = deps.clearTimeoutFn ?? G.clearTimeout?.bind(G) ?? (() => undefined);
+    this.setIntervalFn = deps.setIntervalFn ?? G.setInterval?.bind(G) ?? (() => 0);
+    this.clearIntervalFn = deps.clearIntervalFn ?? G.clearInterval?.bind(G) ?? (() => undefined);
 
     const detected = this.win !== undefined && this.doc !== undefined ? 'browser' : 'node';
     this.runtime = opts.runtime ?? detected;
