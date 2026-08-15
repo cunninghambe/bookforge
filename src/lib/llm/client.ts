@@ -336,8 +336,16 @@ export interface CliArgsOptions {
 // Pure: the argv list for a headless call. --system-prompt REPLACES the default
 // Claude Code system prompt (never --append-system-prompt), so bookforge's prose
 // calls do not inherit the tool-oriented default. --tools "" disables every
-// built-in tool and --max-turns 1 keeps it single-turn. With neither A10 session
-// option the argv is byte-identical to the pre-A10 shape. Unit tested.
+// built-in tool and --max-turns 1 keeps it single-turn.
+//
+// D196: --tools "" alone is NOT enough to get a bare text-in/text-out model. It
+// drops only the built-in tools; every MCP server configured for the host user
+// stays loaded. Measured on the production box 2026-08-14, this argv handed the
+// model 172 tools across 9 MCP servers — including Gmail send and Notion write —
+// on every drafting call. --strict-mcp-config limits MCP to servers passed via
+// --mcp-config, and we pass none, which takes the tool count to 0. It is a
+// boolean flag, so the variadic --tools does not swallow it. Unit tested across
+// every argv variant, because a session resume must not re-attach them.
 export function buildCliArgs(opts: CliArgsOptions): string[] {
   // A23.4 / D188: the model id is the one caller-supplied value that reaches
   // argv. The Windows fallback can spawn with shell true (D64), where argv
@@ -358,6 +366,7 @@ export function buildCliArgs(opts: CliArgsOptions): string[] {
   args.push(
     "--tools",
     "",
+    "--strict-mcp-config",
     "--output-format",
     opts.streaming ? "stream-json" : "json",
   );

@@ -100,6 +100,34 @@ describe("buildCliArgs", () => {
     expect(args[i + 1]).toBe("");
   });
 
+  // D196: --tools "" drops only the BUILT-IN tools. Every MCP server configured
+  // for the host user stays loaded, so without --strict-mcp-config a prose call
+  // is handed the operator's MCP fleet (measured on the production box
+  // 2026-08-14: 172 tools across 9 servers, including Gmail send and Notion
+  // write). --strict-mcp-config limits MCP to servers passed via --mcp-config,
+  // of which we pass none, taking the tool count to 0. Boolean flag, so the
+  // variadic --tools does not swallow it.
+  it("detaches the host's MCP servers", () => {
+    const args = buildCliArgs({ model: "opus", streaming: false });
+    expect(args).toContain("--strict-mcp-config");
+  });
+
+  // The flag is a security control, so it must hold across every argv variant,
+  // not just the default one — a session resume must not silently re-attach the
+  // host's MCP servers.
+  it.each([
+    ["default", { model: "opus", streaming: false }],
+    ["streaming", { model: "opus", streaming: true }],
+    ["persistSession", { model: "opus", streaming: false, persistSession: true }],
+    [
+      "resumeSessionId",
+      { model: "opus", streaming: true, resumeSessionId: "abc-123" },
+    ],
+    ["with system prompt", { model: "opus", streaming: false, system: "S" }],
+  ])("keeps --strict-mcp-config in the %s variant", (_name, opts) => {
+    expect(buildCliArgs(opts)).toContain("--strict-mcp-config");
+  });
+
   it("omits --system-prompt entirely when no system prompt is given", () => {
     const args = buildCliArgs({ model: "opus", streaming: false });
     expect(args).not.toContain("--system-prompt");
@@ -263,7 +291,7 @@ describe("parseStreamEvent", () => {
 import { SessionStore } from "@/lib/llm/client";
 
 describe("buildCliArgs A10 session variants", () => {
-  it("with neither session option the argv is byte-identical to the pre-A10 shape", () => {
+  it("with neither session option the argv is the pre-A10 shape plus the D196 MCP opt-out", () => {
     expect(
       buildCliArgs({ model: "m1", system: "S", streaming: false }),
     ).toEqual([
@@ -275,6 +303,7 @@ describe("buildCliArgs A10 session variants", () => {
       "--no-session-persistence",
       "--tools",
       "",
+      "--strict-mcp-config",
       "--output-format",
       "json",
       "--system-prompt",
